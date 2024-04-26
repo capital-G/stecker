@@ -89,6 +89,7 @@ impl Connection {
                     Box::pin(async move {
                         let _: Result<usize, webrtc::Error> = d2.send_text(msg2).await;
                         // --> here I want to call a function located in connection: Connection
+                        handle_message(connection, message)
                     })
                 }));
                 Box::pin(async {})
