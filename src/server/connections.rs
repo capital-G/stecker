@@ -1,8 +1,8 @@
+use crate::models::{BroadcastRoom, Connection};
 use base64::Engine;
+use tokio::sync::mpsc::Sender;
 use tokio::sync::Mutex;
 use webrtc::peer_connection::sdp::session_description::RTCSessionDescription;
-use crate::models::{BroadcastRoom, Connection, User};
-use anyhow::anyhow;
 
 use base64::prelude::BASE64_STANDARD;
 
@@ -29,22 +29,21 @@ pub fn decode_b64(s: &str) -> anyhow::Result<String> {
 }
 
 pub struct ConnectionWithOffer {
-    pub connection: Connection,
+    pub connection: Arc<Mutex<Connection>>,
     pub offer: String,
 }
 
-async fn handle_message(connection: &Connection, message: DataChannelMessage) {
-    println!("Its time to handle the message");
-}
-
 impl Connection {
-    pub async fn respond_to_offer(offer: String) -> anyhow::Result<ConnectionWithOffer> {
+    pub async fn respond_to_offer(
+        offer: String,
+        tx: Arc<Sender<i32>>,
+    ) -> anyhow::Result<ConnectionWithOffer> {
         let desc_data = decode_b64(&offer)?;
         let offer = serde_json::from_str::<RTCSessionDescription>(&desc_data)?;
 
         let mut m = MediaEngine::default();
         m.register_default_codecs()?;
-        
+
         let mut registry = Registry::new();
         registry = register_default_interceptors(registry, &mut m)?;
 
@@ -60,41 +59,58 @@ impl Connection {
             }],
             ..Default::default()
         };
-    
+
         let peer_connection = Arc::new(api.new_peer_connection(config).await?);
 
-        peer_connection
-            .on_data_channel(Box::new(move |d: Arc<RTCDataChannel>| {
-                let d_label = d.label().to_owned();
-                let d_id = d.id();
-                let d2 = d.clone();
+        let connection = Arc::new(Mutex::new(Connection {
+            peer_connection: peer_connection.clone(),
+            data_channel: None,
+        }));
 
-                d.on_close(Box::new(|| {
-                    println!("Data channel closed");
-                    Box::pin(async {})
-                }));
+        let connection_clone = connection.clone();
 
-                d.on_open(Box::new(move || {
-                    println!("Opened channel");
-                    Box::pin(async {
-                        // hello_world().await;
-                    })
-                }));
+        peer_connection.on_data_channel(Box::new(move |d: Arc<RTCDataChannel>| {
+            let tx2 = tx.clone();
+            // let d_label = d.label().to_owned();
+            // let d_id = d.id();
+            let d2 = d.clone();
 
-                d.on_message(Box::new(move |message: DataChannelMessage| {
-                    let msg_str = String::from_utf8(message.data.to_vec()).unwrap();
-                    println!("Received message {msg_str}");
-                    let msg2 = msg_str.clone();
-                    let d2 = d2.clone();
-                    Box::pin(async move {
-                        let _: Result<usize, webrtc::Error> = d2.send_text(msg2).await;
-                        // --> here I want to call a function located in connection: Connection
-                        handle_message(connection, message)
-                    })
-                }));
+            d.on_close(Box::new(|| {
+                println!("Data channel closed");
                 Box::pin(async {})
-            }
-        ));
+            }));
+
+            d.on_open(Box::new(move || {
+                println!("Opened channel");
+                Box::pin(async move {
+                    // hello_world().await;
+                })
+            }));
+
+            d.on_message(Box::new(move |message: DataChannelMessage| {
+                let msg_str = String::from_utf8(message.data.to_vec()).unwrap();
+                println!("Received message {msg_str}");
+                let msg2 = msg_str.clone();
+                let d2 = d2.clone();
+
+                let tx3 = tx2.clone();
+
+                Box::pin(async move {
+                    let _: Result<usize, webrtc::Error> = d2.send_text(msg2).await;
+
+                    match tx3.send(32).await {
+                        Ok(_) => println!("Ok"),
+                        Err(x) => println!("Error {x}"),
+                    }
+                })
+            }));
+
+            let c2 = connection.clone();
+
+            Box::pin(async move {
+                c2.lock().await.data_channel = Some(d.clone());
+            })
+        }));
 
         peer_connection.set_remote_description(offer).await?;
         let answer = peer_connection.create_answer(None).await?;
@@ -118,41 +134,16 @@ impl Connection {
             Err(anyhow::anyhow!("Error while creating RTC offer"))
         };
 
-        let connection = Connection {
-            peer_connection,
-            data_channel: None,
-        };
-
-        Ok(ConnectionWithOffer{
-            connection,
-            offer: offer?
+        Ok(ConnectionWithOffer {
+            connection: connection_clone,
+            offer: offer?,
         })
     }
-
-    pub async fn received_message(&self, message: DataChannelMessage) {
-
-    }
-
-    // pub async fn create_offer(&self) -> anyhow::Result<String> {
-    //     // Create an offer to send to the browser
-    //     let offer = &self.peer_connection.create_offer(None).await?;
-
-    //     // Create channel that is blocked until ICE Gathering is complete
-    //     let mut gather_complete = &self.peer_connection.gathering_complete_promise().await;
-
-    //     // Sets the LocalDescription, and starts our UDP listeners
-    //     let _ = &self.peer_connection.set_local_description(offer.clone()).await?;
-
-    //     match self.peer_connection.local_description().await {
-    //         None => Err(anyhow!("Could not create local description!")),
-    //         Some(description) => encode_offer(description)
-    //     } 
-    // }   
 }
 
 impl BroadcastRoom {
     pub async fn create_new_room(name: String) -> anyhow::Result<Self> {
-        // let (done_tx, mut done_rx) = tokio::sync::mpsc::channel::<()>(1);
+        let (_, done_rx) = tokio::sync::mpsc::channel::<i32>(1);
 
         // peer_connection.on_peer_connection_state_change(Box::new(move |s: RTCPeerConnectionState| {
         //     println!("Peer connection state changed to {}", s);
@@ -165,18 +156,17 @@ impl BroadcastRoom {
         //     Box::pin(async {})
         // }));
 
-        let mut broadcast_room = BroadcastRoom {
+        let broadcast_room = BroadcastRoom {
             name,
             source_connection: None,
             target_connections: Mutex::new(vec![]),
+            rx: done_rx,
         };
 
         Ok(broadcast_room)
-
     }
 
-    pub async fn join_room(&mut self, connection: Connection) {
-        let conns = self.target_connections.get_mut();
-        conns.push(connection);
+    pub async fn join_room(&mut self, connection: Arc<Mutex<Connection>>) {
+        self.target_connections.get_mut().push(connection);
     }
 }
