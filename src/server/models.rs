@@ -2,12 +2,6 @@ use std::sync::Arc;
 use tokio::sync::{mpsc::Receiver, Mutex};
 use webrtc::{data_channel::RTCDataChannel, peer_connection::RTCPeerConnection};
 
-#[derive(Clone)]
-pub struct User {
-    pub uuid: String,
-    pub name: String,
-    pub connection: Connection,
-}
 
 #[derive(Clone)]
 pub struct Connection {

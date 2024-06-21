@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use crate::models::{BroadcastRoom as BaseRoom, Connection, User};
+use crate::models::{BroadcastRoom as BaseRoom, Connection};
 use tokio::sync::Mutex;
 use uuid::Uuid;
 
@@ -9,18 +9,6 @@ use async_graphql::{Context, Object, Result, SimpleObject};
 use crate::AppState;
 
 pub struct Query;
-
-#[Object]
-impl User {
-    async fn id(&self) -> &str {
-        return "foo";
-        // &self.id
-    }
-
-    async fn name(&self) -> &str {
-        &self.name
-    }
-}
 
 #[derive(SimpleObject)]
 struct Room {
