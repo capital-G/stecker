@@ -24,7 +24,7 @@ impl Query {
     async fn counter<'a>(&self, ctx: &Context<'a>) -> i32 {
         let mut counter = ctx.data_unchecked::<AppState>().counter.lock().await;
         *counter += 1;
-        return *counter;
+        *counter
     }
 
     async fn rooms<'a>(&self, ctx: &Context<'a>) -> Result<Vec<Room>> {
@@ -52,7 +52,7 @@ impl Mutation {
     async fn counter_offset<'a>(&self, ctx: &Context<'a>, offset: i32) -> i32 {
         let mut foo = ctx.data_unchecked::<AppState>().counter.lock().await;
         *foo += offset;
-        return *foo;
+        *foo
     }
 
     async fn create_room<'a>(
