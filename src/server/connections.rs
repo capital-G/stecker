@@ -36,7 +36,7 @@ pub struct ConnectionWithOffer {
 impl Connection {
     pub async fn respond_to_offer(
         offer: String,
-        tx: Arc<Sender<i32>>,
+        tx: Arc<Sender<String>>,
     ) -> anyhow::Result<ConnectionWithOffer> {
         let desc_data = decode_b64(&offer)?;
         let offer = serde_json::from_str::<RTCSessionDescription>(&desc_data)?;
@@ -71,9 +71,6 @@ impl Connection {
 
         peer_connection.on_data_channel(Box::new(move |d: Arc<RTCDataChannel>| {
             let tx2 = tx.clone();
-            // let d_label = d.label().to_owned();
-            // let d_id = d.id();
-            let d2 = d.clone();
 
             d.on_close(Box::new(|| {
                 println!("Data channel closed");
@@ -83,24 +80,19 @@ impl Connection {
             d.on_open(Box::new(move || {
                 println!("Opened channel");
                 Box::pin(async move {
-                    // hello_world().await;
                 })
             }));
 
             d.on_message(Box::new(move |message: DataChannelMessage| {
                 let msg_str = String::from_utf8(message.data.to_vec()).unwrap();
-                println!("Received message {msg_str}");
                 let msg2 = msg_str.clone();
-                let d2 = d2.clone();
-
+                
                 let tx3 = tx2.clone();
 
                 Box::pin(async move {
-                    let _: Result<usize, webrtc::Error> = d2.send_text(msg2).await;
-
-                    match tx3.send(32).await {
-                        Ok(_) => println!("Ok"),
-                        Err(x) => println!("Error {x}"),
+                    match tx3.send(msg2).await {
+                        Ok(_) => (),
+                        Err(x) => println!("Could not forward message: {x}"),
                     }
                 })
             }));

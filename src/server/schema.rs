@@ -64,7 +64,7 @@ impl Mutation {
         let mut rooms = state.rooms.lock().await;
         let mut room = BaseRoom::create_new_room(name).await?;
 
-        let (tx, mut rx) = tokio::sync::mpsc::channel::<i32>(1);
+        let (tx, mut rx) = tokio::sync::mpsc::channel::<String>(1);
 
         let new_connection = Connection::respond_to_offer(offer, Arc::new(tx)).await?;
         room.source_connection = Some(new_connection.connection);
@@ -84,13 +84,11 @@ impl Mutation {
                     .iter()
                 {
                     if let Some(data_connection) = &connection.lock().await.data_channel {
-                        println!("Now need to send something to someone");
                         let _ = data_connection
-                            .send_text("I hope you received something")
+                            .send_text(&msg)
                             .await;
                     }
                 }
-                println!("{msg}");
             }
         });
 
@@ -106,11 +104,10 @@ impl Mutation {
         let state = ctx.data_unchecked::<AppState>();
         let mut rooms = state.rooms.lock().await;
 
-        let (tx, _rx) = tokio::sync::mpsc::channel::<i32>(1);
+        let (tx, _rx) = tokio::sync::mpsc::channel::<String>(1);
 
         if let Some(room) = rooms.get_mut(&room_uuid) {
             let connection_offer = Connection::respond_to_offer(offer, Arc::new(tx)).await?;
-            // @todo
             room.lock()
                 .await
                 .join_room(connection_offer.connection)
