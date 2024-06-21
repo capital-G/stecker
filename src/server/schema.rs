@@ -29,17 +29,18 @@ impl Query {
         let state = ctx.data_unchecked::<AppState>();
         let rooms = state.rooms.lock().await;
 
-        Ok(rooms
-            .iter()
-            .map(|(uuid, _room)| {
-                Room {
-                    uuid: uuid.clone(),
-                    // @todo async mutex makes problems here
-                    name: "Hello".to_string(),
-                    num_listeners: 0,
-                }
-            })
-            .collect())
+        // map does not support async which is necessary due to async,
+        // therefore we use this atrocity
+        let mut results = Vec::with_capacity(rooms.len());
+        for (uuid, room) in rooms.iter() {
+            let locked_room = room.lock().await;
+            results.push(Room {
+                uuid: uuid.clone(),
+                name: locked_room.name.clone(),
+                num_listeners: 0,
+            });
+        }
+        Ok(results)
     }
 }
 
