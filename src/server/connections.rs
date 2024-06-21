@@ -145,17 +145,6 @@ impl BroadcastRoom {
     pub async fn create_new_room(name: String) -> anyhow::Result<Self> {
         let (_, done_rx) = tokio::sync::mpsc::channel::<i32>(1);
 
-        // peer_connection.on_peer_connection_state_change(Box::new(move |s: RTCPeerConnectionState| {
-        //     println!("Peer connection state changed to {}", s);
-
-        //     if s == RTCPeerConnectionState::Failed {
-        //         println!("Peer connection failed: {}", s);
-        //         let _ = done_tx.try_send(());
-        //     }
-
-        //     Box::pin(async {})
-        // }));
-
         let broadcast_room = BroadcastRoom {
             name,
             source_connection: None,

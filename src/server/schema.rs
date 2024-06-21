@@ -13,8 +13,6 @@ pub struct Query;
 #[derive(SimpleObject)]
 struct Room {
     uuid: String,
-    // #[graphql(flatten)]
-    // room: BaseRoom,
     name: String,
     num_listeners: usize,
 }
@@ -111,7 +109,6 @@ impl Mutation {
         let (tx, _rx) = tokio::sync::mpsc::channel::<i32>(1);
 
         if let Some(room) = rooms.get_mut(&room_uuid) {
-            // room.listeners.add(rtc peer connection)
             let connection_offer = Connection::respond_to_offer(offer, Arc::new(tx)).await?;
             // @todo
             room.lock()
@@ -122,6 +119,5 @@ impl Mutation {
         } else {
             Err("Found no room with the given UUID".into())
         }
-        // None => Err("Found no room with the given UUID".into()),
     }
 }
