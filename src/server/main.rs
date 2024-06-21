@@ -14,6 +14,7 @@ use axum::{
 };
 use models::BroadcastRoom;
 use tokio::{net::TcpListener, sync::Mutex};
+use tower_http::services::ServeDir;
 
 struct AppState {
     pub counter: Mutex<i32>,
@@ -39,9 +40,12 @@ async fn main() {
         .data(AppState::new())
         .finish();
 
-    let app = Router::new().route("/", get(graphiql).post_service(GraphQL::new(schema)));
+    let app = Router::new()
+        .route("/", get(graphiql)
+        .post_service(GraphQL::new(schema)))
+        .nest_service("/debug", ServeDir::new("./src/server/templates"));
 
-    println!("GraphiQL IDE: http://localhost:8000");
+    println!("GraphiQL IDE: http://127.0.0.1:8000");
 
     axum::serve(TcpListener::bind("127.0.0.1:8000").await.unwrap(), app)
         .await

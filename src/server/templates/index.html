@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+
+<head>
+    <title>Stecker debug</title>
+    <script src="//unpkg.com/alpinejs"></script>
+    <script src="stecker.js"></script>
+    <link rel="stylesheet" href="style.css" />
+</head>
+
+<body>
+    <div class="content container" x-data>
+        <h2>Rooms</h2>
+        <div class="rooms">
+            <ul class="rooms">
+                <template x-for="room in $store.stecker.rooms">
+                    <div>
+                        <li>
+                            <button class="button" @click="$store.stecker.joinRoom(`${room.uuid}`)" x-bind:disabled="!$store.stecker.localSessionDescription" x-text="`Join room ${room.name}`"></button>
+                        </li>
+                    </div>
+                </template>
+            </ul>
+            <span class="button" @click="$store.stecker.getRooms()">Reload rooms</span>
+        </div>
+
+
+        <div class="form" x-data="{roomName: ''}">
+            <div class="field">
+                <label class="label">Browser base64 Session Description</label>
+                <div class="control">
+                    <input class="input" disabled readonly="true" :value="$store.stecker.localSessionDescription"></input>
+                </div>
+            </div>
+
+            <div class="field">
+                <label class="label">Stecker base64 Session Description</label>
+                <div class="control">
+                    <input class="input" disabled :value="$store.stecker.remoteSessionDescription"></input>
+                </div>
+            </div>
+
+            <div class="field">
+                <label class="label">Room name</label>
+                <div class="control">
+                    <input class="input" x-model="roomName" x-bind:disabled="$store.stecker.createdRoom"></input>
+                </div>
+            </div>
+
+            <button class="button is-link" @click="$store.stecker.createRoom(roomName)" x-bind:disabled="(roomName.length == 0) || $store.stecker.remoteSessionDescription!==null">Create room</button><br/>
+
+            <div class="field">
+                <label class="label">Message</label>
+                <div class="control">
+                    <input class="input" x-model="$store.stecker.message" :disabled="!$store.stecker.createdRoom"></input>
+                </div>
+            </div>
+            <button x-bind:disabled="!$store.stecker.createdRoom" class="button" @click="$store.stecker.sendMessage()"> Send Message </button> <br />
+        </div>
+
+
+        <div x-data>
+            <template x-for="message in $store.stecker.messages">
+                <p x-text="message"><br/></p>
+            </template>
+        </div>
+
+    </div>
+
+</body>
+
+</html>
