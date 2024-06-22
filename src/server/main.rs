@@ -41,8 +41,11 @@ async fn main() {
         .finish();
 
     let app = Router::new()
-        .route("/", get(graphiql)
-        .post_service(GraphQL::new(schema)))
+        .route(
+            "/",
+            get(graphiql).post_service(GraphQL::new(schema.clone())),
+        )
+        .route("/schema.graphql", get(|| async move { schema.sdl() }))
         .nest_service("/debug", ServeDir::new("./src/server/templates"));
 
     println!("GraphiQL IDE: http://127.0.0.1:8000");
