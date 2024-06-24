@@ -231,7 +231,7 @@ async fn create_room(
         .body(query.to_string())
         .send()
         .await?;
-    let results = res.json::<CreateRoomResponse>().await?;
+    let results = res.json::<GQLResponse<CreateRoomData>>().await?;
     println!("Response from server: {results:?}");
     let desc_data = signal::decode(results.data.create_room.as_str())?;
     let answer = serde_json::from_str::<RTCSessionDescription>(&desc_data)?;
@@ -259,7 +259,7 @@ async fn join_room(
         .send()
         .await?;
     println!("{res:?}");
-    match res.json::<JoinRoomResponse>().await {
+    match res.json::<GQLResponse<JoinRoomData>>().await {
         Ok(results) => {
             let desc_data = signal::decode(results.data.join_room.as_str())?;
             let answer = serde_json::from_str::<RTCSessionDescription>(&desc_data)?;
@@ -274,23 +274,18 @@ async fn join_room(
 }
 
 #[derive(Deserialize, Debug)]
-struct CreateRoomResponse {
-    data: CreateRoomData,
+struct GQLResponse<T> {
+    data: T
 }
 
 #[derive(Deserialize, Debug)]
+#[serde(rename_all = "camelCase")]
 struct CreateRoomData {
-    #[serde(rename(deserialize = "createRoom"))]
     create_room: String,
 }
 
 #[derive(Deserialize, Debug)]
-struct JoinRoomResponse {
-    data: JoinRoomData,
-}
-
-#[derive(Deserialize, Debug)]
+#[serde(rename_all = "camelCase")]
 struct JoinRoomData {
-    #[serde(rename(deserialize = "joinRoom"))]
     join_room: String,
 }
