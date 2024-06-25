@@ -3,6 +3,7 @@ use std::{env, sync::Arc, time::Duration};
 use anyhow::Result;
 use serde::Deserialize;
 use serde_json::json;
+use shared::utils::decode_b64;
 use tokio::sync::mpsc::Sender;
 use webrtc::{
     api::{
@@ -18,13 +19,12 @@ use webrtc::{
     },
 };
 
-mod signal;
-
 const HOST: &str = "http://127.0.0.1:8000";
 
 #[tokio::main]
 async fn main() {
     let args: Vec<String> = env::args().collect();
+    println!("{:?}", args);
     match args.get(1) {
         Some(uuid) => match run_to_join(uuid).await {
             Ok(_) => println!("this was the client that joind {uuid}"),
@@ -145,7 +145,7 @@ async fn create_rtc_offer(peer_connection: &RTCPeerConnection) -> anyhow::Result
     // Output the answer in base64 so we can safely transfer it as a json value
     if let Some(local_desc) = peer_connection.local_description().await {
         let json_str = serde_json::to_string(&local_desc)?;
-        let b64 = signal::encode(&json_str);
+        let b64 = decode_b64(&json_str)?;
 
         Ok(b64)
     } else {
@@ -233,7 +233,7 @@ async fn create_room(
         .await?;
     let results = res.json::<GQLResponse<CreateRoomData>>().await?;
     println!("Response from server: {results:?}");
-    let desc_data = signal::decode(results.data.create_room.as_str())?;
+    let desc_data = decode_b64(results.data.create_room.as_str())?;
     let answer = serde_json::from_str::<RTCSessionDescription>(&desc_data)?;
 
     Ok(answer)
@@ -261,7 +261,7 @@ async fn join_room(
     println!("{res:?}");
     match res.json::<GQLResponse<JoinRoomData>>().await {
         Ok(results) => {
-            let desc_data = signal::decode(results.data.join_room.as_str())?;
+            let desc_data = decode_b64(results.data.join_room.as_str())?;
             let answer = serde_json::from_str::<RTCSessionDescription>(&desc_data)?;
 
             Ok(answer)

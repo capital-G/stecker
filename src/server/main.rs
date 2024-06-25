@@ -1,6 +1,6 @@
-pub mod connections;
-pub mod models;
 pub mod schema;
+
+use shared::models;
 
 use std::{collections::HashMap, sync::Arc};
 

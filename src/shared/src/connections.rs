@@ -1,10 +1,9 @@
 use crate::models::{BroadcastRoom, Connection};
-use base64::Engine;
+use crate::utils::{decode_b64, encode_offer};
+
 use tokio::sync::mpsc::Sender;
 use tokio::sync::Mutex;
 use webrtc::peer_connection::sdp::session_description::RTCSessionDescription;
-
-use base64::prelude::BASE64_STANDARD;
 
 use std::sync::Arc;
 use webrtc::api::interceptor_registry::register_default_interceptors;
@@ -15,18 +14,6 @@ use webrtc::data_channel::RTCDataChannel;
 use webrtc::ice_transport::ice_server::RTCIceServer;
 use webrtc::interceptor::registry::Registry;
 use webrtc::peer_connection::configuration::RTCConfiguration;
-
-pub fn encode_offer(offer: RTCSessionDescription) -> anyhow::Result<String> {
-    let json = serde_json::to_string(&offer)?;
-    Ok(BASE64_STANDARD.encode(json))
-}
-
-pub fn decode_b64(s: &str) -> anyhow::Result<String> {
-    let b = BASE64_STANDARD.decode(s)?;
-
-    let s = String::from_utf8(b)?;
-    Ok(s)
-}
 
 pub struct ConnectionWithOffer {
     pub connection: Arc<Mutex<Connection>>,
