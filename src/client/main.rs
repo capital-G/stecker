@@ -1,9 +1,11 @@
 use std::{env, sync::Arc, time::Duration};
 
+mod api;
+
 use anyhow::Result;
-use serde::Deserialize;
-use serde_json::json;
-use shared::utils::{decode_b64, encode_offer};
+
+use api::APIClient;
+use shared::utils::encode_offer;
 use tokio::sync::mpsc::Sender;
 use webrtc::{
     api::{
@@ -15,7 +17,7 @@ use webrtc::{
     peer_connection::{
         configuration::RTCConfiguration, math_rand_alpha,
         peer_connection_state::RTCPeerConnectionState,
-        sdp::session_description::RTCSessionDescription, RTCPeerConnection,
+        RTCPeerConnection,
     },
 };
 
@@ -24,7 +26,7 @@ const HOST: &str = "http://127.0.0.1:8000";
 #[tokio::main]
 async fn main() {
     let args: Vec<String> = env::args().collect();
-    println!("{:?}", args);
+
     match args.get(1) {
         Some(uuid) => match run_to_join(uuid).await {
             Ok(_) => println!("this was the client that joind {uuid}"),
@@ -158,7 +160,11 @@ async fn run_to_create() -> anyhow::Result<()> {
     let peer_connection = create_connection(done_tx).await?;
     let offer = create_rtc_offer(&peer_connection).await?;
 
-    match create_room("foo", &offer).await {
+    let api_client = APIClient {
+        host: HOST.to_string(),
+    };
+
+    match api_client.create_room("foo", &offer).await {
         Ok(answer) => {
             // Apply the answer as the remote description
             peer_connection.set_remote_description(answer).await?;
@@ -183,10 +189,14 @@ async fn run_to_create() -> anyhow::Result<()> {
 async fn run_to_join(uuid: &str) -> anyhow::Result<()> {
     let (done_tx, mut done_rx) = tokio::sync::mpsc::channel::<()>(1);
 
-    let peer_connection = create_connection(done_tx).await?;
+    let peer_connection: RTCPeerConnection = create_connection(done_tx).await?;
     let offer = create_rtc_offer(&peer_connection).await?;
 
-    match join_room(uuid, &offer).await {
+    let api_client = APIClient {
+        host: HOST.to_string(),
+    };
+
+    match api_client.join_room(uuid, &offer).await {
         Ok(answer) => {
             // Apply the answer as the remote description
             peer_connection.set_remote_description(answer).await?;
@@ -206,84 +216,4 @@ async fn run_to_join(uuid: &str) -> anyhow::Result<()> {
         }
         Err(err) => Err(err),
     }
-}
-
-// API Calls
-
-async fn create_room(
-    name: &str,
-    local_session_description: &str,
-) -> anyhow::Result<RTCSessionDescription> {
-    let query = json!({
-        "query": "mutation createRoom($name:String!, $offer:String!) { createRoom(name:$name, offer:$offer) }",
-        "variables": {
-            "name": name,
-            "offer": local_session_description,
-        }
-    });
-    let client = reqwest::Client::new();
-    let res = client
-        .post(HOST)
-        .header("Content-Type", "application/json")
-        .header("Accept", "application/json")
-        .body(query.to_string())
-        .send()
-        .await?;
-    let results = res.json::<GQLResponse<CreateRoomData>>().await?;
-    println!("Response from server: {results:?}");
-    let desc_data = decode_b64(results.data.create_room.as_str())?;
-    let answer = serde_json::from_str::<RTCSessionDescription>(&desc_data)?;
-
-    Ok(answer)
-}
-
-async fn join_room(
-    uuid: &str,
-    local_session_description: &str,
-) -> anyhow::Result<RTCSessionDescription> {
-    let query = json!({
-        "query": "mutation joinRoom($uuid:String!, $offer:String!) { joinRoom(roomUuid:$uuid, offer:$offer) }",
-        "variables": {
-            "uuid": uuid,
-            "offer": local_session_description,
-        }
-    });
-    let client = reqwest::Client::new();
-    let res = client
-        .post(HOST)
-        .header("Content-Type", "application/json")
-        .header("Accept", "application/json")
-        .body(query.to_string())
-        .send()
-        .await?;
-    println!("{res:?}");
-    match res.json::<GQLResponse<JoinRoomData>>().await {
-        Ok(results) => {
-            let desc_data = decode_b64(results.data.join_room.as_str())?;
-            let answer = serde_json::from_str::<RTCSessionDescription>(&desc_data)?;
-
-            Ok(answer)
-        }
-        Err(err) => {
-            println!("ERR joinRoom response: {err}");
-            Err(err.into())
-        }
-    }
-}
-
-#[derive(Deserialize, Debug)]
-struct GQLResponse<T> {
-    data: T
-}
-
-#[derive(Deserialize, Debug)]
-#[serde(rename_all = "camelCase")]
-struct CreateRoomData {
-    create_room: String,
-}
-
-#[derive(Deserialize, Debug)]
-#[serde(rename_all = "camelCase")]
-struct JoinRoomData {
-    join_room: String,
 }
