@@ -1,10 +1,13 @@
 pub mod schema;
+pub mod broadcast_room;
 
 use shared::models;
 
 use std::{collections::HashMap, sync::Arc};
 
 use crate::schema::{Mutation, Query};
+use crate::broadcast_room::BroadcastRoom;
+
 use async_graphql::{http::GraphiQLSource, EmptySubscription, Schema};
 use async_graphql_axum::GraphQL;
 use axum::{
@@ -12,7 +15,7 @@ use axum::{
     routing::get,
     Router,
 };
-use models::BroadcastRoom;
+// use models::BroadcastRoom;
 use tokio::{net::TcpListener, sync::Mutex};
 use tower_http::services::ServeDir;
 
