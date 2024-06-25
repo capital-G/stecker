@@ -3,7 +3,7 @@ use std::{env, sync::Arc, time::Duration};
 use anyhow::Result;
 use serde::Deserialize;
 use serde_json::json;
-use shared::utils::decode_b64;
+use shared::utils::{decode_b64, encode_offer};
 use tokio::sync::mpsc::Sender;
 use webrtc::{
     api::{
@@ -144,9 +144,7 @@ async fn create_rtc_offer(peer_connection: &RTCPeerConnection) -> anyhow::Result
 
     // Output the answer in base64 so we can safely transfer it as a json value
     if let Some(local_desc) = peer_connection.local_description().await {
-        let json_str = serde_json::to_string(&local_desc)?;
-        let b64 = decode_b64(&json_str)?;
-
+        let b64 = encode_offer(local_desc)?;
         Ok(b64)
     } else {
         println!("generate local_description failed!");
