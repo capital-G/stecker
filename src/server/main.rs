@@ -1,8 +1,6 @@
 pub mod broadcast_room;
 pub mod schema;
 
-use shared::models;
-
 use std::{collections::HashMap, sync::Arc};
 
 use crate::broadcast_room::BroadcastRoom;

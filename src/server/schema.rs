@@ -1,6 +1,5 @@
 use crate::broadcast_room::BroadcastRoom;
 use shared::connections::{listen_for_data_channel, SteckerWebRTCConnection};
-use webrtc::dtls::conn;
 
 use std::sync::{Arc, Mutex};
 use tokio::sync::Mutex as AsyncMutex;
@@ -81,14 +80,13 @@ impl Mutation {
         };
 
         let mut rooms = state.rooms.lock().await;
-        
+
         let room_mutex = Arc::new(AsyncMutex::new(room));
         rooms.insert(uuid.to_string(), room_mutex.clone());
-        
 
         tokio::spawn(async move {
             let mut room_receiver = reply.subscribe();
-            
+
             while let Ok(msg) = room_receiver.recv().await {
                 println!("Received something from a target (?): {}", msg.clone());
             }
@@ -105,14 +103,14 @@ impl Mutation {
     ) -> Result<String> {
         let state = ctx.data_unchecked::<AppState>();
         let mut rooms = state.rooms.lock().await;
-        let  room = rooms.get_mut(&room_uuid);
+        let room = rooms.get_mut(&room_uuid);
 
         if room.is_none() {
             return Err("No such room {room_uuid}".into());
         }
 
         let room = room.unwrap().lock().await;
-        
+
         let mut room_rx = room.broadcast.subscribe();
         let room_tx = room.reply.clone();
 
@@ -123,16 +121,16 @@ impl Mutation {
         // Listen to client messages and pass them to the room (not broadcasted)
         tokio::spawn(async move {
             let mut client_receiver = broadcast.subscribe();
-            
+
             while let Ok(msg) = client_receiver.recv().await {
                 if let Err(err) = room_tx.send(msg) {
                     println!("Failed forwarding message from target channel to room (?): {err}");
                 }
-            } 
+            }
         });
 
         // Listen to room messages and pass them to client
-        tokio::spawn(async move {    
+        tokio::spawn(async move {
             while let Ok(msg) = room_rx.recv().await {
                 println!("Broadcasting Message: {msg}");
                 if let Err(err) = reply.send(msg) {

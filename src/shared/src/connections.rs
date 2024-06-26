@@ -1,9 +1,8 @@
 use crate::models::Connection;
 use crate::utils::{decode_b64, encode_offer};
 
-use std::sync::Mutex as SyncMutex;
-use tokio::sync::mpsc::{Receiver, Sender};
 use tokio::sync::broadcast;
+use tokio::sync::mpsc::Sender;
 use tokio::sync::Mutex;
 use webrtc::peer_connection::sdp::session_description::RTCSessionDescription;
 use webrtc::peer_connection::RTCPeerConnection;
@@ -131,7 +130,9 @@ pub struct SteckerWebRTCConnection {
     data_channel: Mutex<Option<Arc<RTCDataChannel>>>,
 }
 
-pub async fn listen_for_data_channel(peer_connection: &RTCPeerConnection) -> (broadcast::Sender<String>, broadcast::Sender<String>) {
+pub async fn listen_for_data_channel(
+    peer_connection: &RTCPeerConnection,
+) -> (broadcast::Sender<String>, broadcast::Sender<String>) {
     let (in_tx, _we_do_not_receive_here) = broadcast::channel::<String>(1);
     let (out_tx, _out_rx) = broadcast::channel::<String>(1);
     let out_tx_clone = out_tx.clone();
@@ -163,16 +164,17 @@ pub async fn listen_for_data_channel(peer_connection: &RTCPeerConnection) -> (br
         Box::pin(async move {
             tokio::spawn(async move {
                 let mut out_rx2 = out_tx2.subscribe();
-            
+
                 while let Ok(msg) = out_rx2.recv().await {
                     println!("Sending out something: {}", msg.clone());
                     match d.send_text(msg).await {
-                        Ok(_) => {},
+                        Ok(_) => {}
                         Err(err) => {
-                            println!("ERROR: forwarding message from channel to data_channel {err}");
-                        },
+                            println!(
+                                "ERROR: forwarding message from channel to data_channel {err}"
+                            );
+                        }
                     }
-              
                 }
             });
         })
@@ -239,7 +241,7 @@ impl SteckerWebRTCConnection {
     pub async fn send_data_channel_message(&self, message: &String) {
         match &*self.data_channel.lock().await {
             Some(dc) => {
-                dc.send_text(message).await;
+                let _ = dc.send_text(message).await;
             }
             None => {
                 println!("Could not send message b/c no data channel is set!")
