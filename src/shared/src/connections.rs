@@ -130,59 +130,6 @@ pub struct SteckerWebRTCConnection {
     data_channel: Mutex<Option<Arc<RTCDataChannel>>>,
 }
 
-pub async fn listen_for_data_channel(
-    peer_connection: &RTCPeerConnection,
-) -> (broadcast::Sender<String>, broadcast::Sender<String>) {
-    let (in_tx, _we_do_not_receive_here) = broadcast::channel::<String>(1);
-    let (out_tx, _out_rx) = broadcast::channel::<String>(1);
-    let out_tx_clone = out_tx.clone();
-    let in_tx_clone = in_tx.clone();
-
-    peer_connection.on_data_channel(Box::new(move |d: Arc<RTCDataChannel>| {
-        let tx2 = in_tx.clone();
-        let out_tx2 = out_tx.clone();
-
-        d.on_close(Box::new(|| {
-            println!("Data channel closed");
-            Box::pin(async {})
-        }));
-
-        d.on_open(Box::new(move || {
-            println!("Opened channel");
-            Box::pin(async move {})
-        }));
-
-        d.on_message(Box::new(move |message: DataChannelMessage| {
-            let msg_str = String::from_utf8(message.data.to_vec()).unwrap();
-            let tx3 = tx2.clone();
-
-            Box::pin(async move {
-                let _ = tx3.send(msg_str);
-            })
-        }));
-
-        Box::pin(async move {
-            tokio::spawn(async move {
-                let mut out_rx2 = out_tx2.subscribe();
-
-                while let Ok(msg) = out_rx2.recv().await {
-                    println!("Sending out something: {}", msg.clone());
-                    match d.send_text(msg).await {
-                        Ok(_) => {}
-                        Err(err) => {
-                            println!(
-                                "ERROR: forwarding message from channel to data_channel {err}"
-                            );
-                        }
-                    }
-                }
-            });
-        })
-    }));
-
-    (out_tx_clone, in_tx_clone)
-}
-
 impl SteckerWebRTCConnection {
     pub async fn build_connection() -> anyhow::Result<Self> {
         let mut m = MediaEngine::default();
@@ -247,5 +194,58 @@ impl SteckerWebRTCConnection {
                 println!("Could not send message b/c no data channel is set!")
             }
         }
+    }
+
+    pub async fn listen_for_data_channel(
+        &self,
+    ) -> (broadcast::Sender<String>, broadcast::Sender<String>) {
+        let (in_tx, _we_do_not_receive_here) = broadcast::channel::<String>(1);
+        let (out_tx, _out_rx) = broadcast::channel::<String>(1);
+        let out_tx_clone = out_tx.clone();
+        let in_tx_clone = in_tx.clone();
+    
+        self.peer_connection.on_data_channel(Box::new(move |d: Arc<RTCDataChannel>| {
+            let tx2 = in_tx.clone();
+            let out_tx2 = out_tx.clone();
+    
+            d.on_close(Box::new(|| {
+                println!("Data channel closed");
+                Box::pin(async {})
+            }));
+    
+            d.on_open(Box::new(move || {
+                println!("Opened channel");
+                Box::pin(async move {})
+            }));
+    
+            d.on_message(Box::new(move |message: DataChannelMessage| {
+                let msg_str = String::from_utf8(message.data.to_vec()).unwrap();
+                let tx3 = tx2.clone();
+    
+                Box::pin(async move {
+                    let _ = tx3.send(msg_str);
+                })
+            }));
+    
+            Box::pin(async move {
+                tokio::spawn(async move {
+                    let mut out_rx2 = out_tx2.subscribe();
+    
+                    while let Ok(msg) = out_rx2.recv().await {
+                        println!("Sending out something: {}", msg.clone());
+                        match d.send_text(msg).await {
+                            Ok(_) => {}
+                            Err(err) => {
+                                println!(
+                                    "ERROR: forwarding message from channel to data_channel {err}"
+                                );
+                            }
+                        }
+                    }
+                });
+            })
+        }));
+    
+        (out_tx_clone, in_tx_clone)
     }
 }

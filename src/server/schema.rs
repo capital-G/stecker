@@ -1,5 +1,5 @@
 use crate::broadcast_room::BroadcastRoom;
-use shared::connections::{listen_for_data_channel, SteckerWebRTCConnection};
+use shared::connections::SteckerWebRTCConnection;
 
 use std::sync::{Arc, Mutex};
 use tokio::sync::Mutex as AsyncMutex;
@@ -67,7 +67,7 @@ impl Mutation {
         let connection = SteckerWebRTCConnection::build_connection().await?;
         let response_offer = connection.respond_to_offer(offer).await?;
 
-        let (reply, broadcast) = listen_for_data_channel(&connection.peer_connection).await;
+        let (reply, broadcast) = connection.listen_for_data_channel().await;
 
         let c2 = Arc::new(connection);
 
@@ -109,14 +109,14 @@ impl Mutation {
             return Err("No such room {room_uuid}".into());
         }
 
+        let connection = SteckerWebRTCConnection::build_connection().await?;
+        let response_offer = connection.respond_to_offer(offer).await?;
+        let (reply, broadcast) = connection.listen_for_data_channel().await;
+
         let room = room.unwrap().lock().await;
 
         let mut room_rx = room.broadcast.subscribe();
         let room_tx = room.reply.clone();
-
-        let connection = SteckerWebRTCConnection::build_connection().await?;
-        let response_offer = connection.respond_to_offer(offer).await?;
-        let (reply, broadcast) = listen_for_data_channel(&connection.peer_connection).await;
 
         // Listen to client messages and pass them to the room (not broadcasted)
         tokio::spawn(async move {
