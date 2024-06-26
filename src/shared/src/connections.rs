@@ -1,9 +1,10 @@
-use crate::models::{Connection};
+use crate::models::Connection;
 use crate::utils::{decode_b64, encode_offer};
 
-use tokio::sync::mpsc::{Receiver, Sender};
-use tokio::sync::Mutex;
 use std::sync::Mutex as SyncMutex;
+use tokio::sync::mpsc::{Receiver, Sender};
+use tokio::sync::broadcast;
+use tokio::sync::Mutex;
 use webrtc::peer_connection::sdp::session_description::RTCSessionDescription;
 use webrtc::peer_connection::RTCPeerConnection;
 
@@ -22,6 +23,7 @@ pub struct ConnectionWithOffer {
     pub offer: String,
 }
 
+// FIXME: is this obsolete now?
 impl Connection {
     pub async fn respond_to_offer(
         offer: String,
@@ -68,14 +70,13 @@ impl Connection {
 
             d.on_open(Box::new(move || {
                 println!("Opened channel");
-                Box::pin(async move {
-                })
+                Box::pin(async move {})
             }));
 
             d.on_message(Box::new(move |message: DataChannelMessage| {
                 let msg_str = String::from_utf8(message.data.to_vec()).unwrap();
                 let msg2 = msg_str.clone();
-                
+
                 let tx3 = tx2.clone();
 
                 Box::pin(async move {
@@ -122,33 +123,63 @@ impl Connection {
     }
 }
 
-// impl BroadcastRoom {
-//     pub async fn create_new_room(name: String) -> anyhow::Result<Self> {
-//         let (_, done_rx) = tokio::sync::mpsc::channel::<i32>(1);
-
-//         let broadcast_room = BroadcastRoom {
-//             name,
-//             source_connection: None,
-//             target_connections: Mutex::new(vec![]),
-//             rx: done_rx,
-//         };
-
-//         Ok(broadcast_room)
-//     }
-
-//     pub async fn join_room(&mut self, connection: Arc<Mutex<Connection>>) {
-//         self.target_connections.get_mut().push(connection);
-//     }
-// }
-
-
 pub struct SteckerWebRTCConnection {
+    // FIXME: potentially both fields are obsolete
     pub peer_connection: RTCPeerConnection,
     // we use a tokio mutex b/c we need to access it
     // from different threads
     data_channel: Mutex<Option<Arc<RTCDataChannel>>>,
 }
 
+pub async fn listen_for_data_channel(peer_connection: &RTCPeerConnection) -> (broadcast::Sender<String>, broadcast::Sender<String>) {
+    let (in_tx, _we_do_not_receive_here) = broadcast::channel::<String>(1);
+    let (out_tx, _out_rx) = broadcast::channel::<String>(1);
+    let out_tx_clone = out_tx.clone();
+    let in_tx_clone = in_tx.clone();
+
+    peer_connection.on_data_channel(Box::new(move |d: Arc<RTCDataChannel>| {
+        let tx2 = in_tx.clone();
+        let out_tx2 = out_tx.clone();
+
+        d.on_close(Box::new(|| {
+            println!("Data channel closed");
+            Box::pin(async {})
+        }));
+
+        d.on_open(Box::new(move || {
+            println!("Opened channel");
+            Box::pin(async move {})
+        }));
+
+        d.on_message(Box::new(move |message: DataChannelMessage| {
+            let msg_str = String::from_utf8(message.data.to_vec()).unwrap();
+            let tx3 = tx2.clone();
+
+            Box::pin(async move {
+                let _ = tx3.send(msg_str);
+            })
+        }));
+
+        Box::pin(async move {
+            tokio::spawn(async move {
+                let mut out_rx2 = out_tx2.subscribe();
+            
+                while let Ok(msg) = out_rx2.recv().await {
+                    println!("Sending out something: {}", msg.clone());
+                    match d.send_text(msg).await {
+                        Ok(_) => {},
+                        Err(err) => {
+                            println!("ERROR: forwarding message from channel to data_channel {err}");
+                        },
+                    }
+              
+                }
+            });
+        })
+    }));
+
+    (out_tx_clone, in_tx_clone)
+}
 
 impl SteckerWebRTCConnection {
     pub async fn build_connection() -> anyhow::Result<Self> {
@@ -205,51 +236,14 @@ impl SteckerWebRTCConnection {
         offer
     }
 
-    pub async fn listen_for_data_channel(self: Arc<Self>) -> Receiver<String> {
-        let self2 = self.clone();
-
-        let (tx, rx) = tokio::sync::mpsc::channel::<String>(1);
-
-        self.peer_connection.on_data_channel(Box::new(move |d: Arc<RTCDataChannel>| {
-            let tx2 = tx.clone();
-
-            d.on_close(Box::new(|| {
-                println!("Data channel closed");
-                Box::pin(async {})
-            }));
-
-            d.on_open(Box::new(move || {
-                println!("Opened channel");
-                Box::pin(async move {
-                })
-            }));
-
-            d.on_message(Box::new(move |message: DataChannelMessage| {
-                let msg_str = String::from_utf8(message.data.to_vec()).unwrap();
-                let tx3 = tx2.clone();
-                
-                Box::pin(async move {
-                    let _ = tx3.send(msg_str).await;
-                })
-            }));
-
-            let self3 = self2.clone();
-
-            Box::pin(async move {
-                let mut x = self3.data_channel.lock().await;
-                *x = Some(d.clone());
-            })
-        }));
-
-        rx
-    }
-
     pub async fn send_data_channel_message(&self, message: &String) {
         match &*self.data_channel.lock().await {
             Some(dc) => {
                 dc.send_text(message).await;
-            },
-            None => {println!("Could not send message b/c no data channel is set!")}
+            }
+            None => {
+                println!("Could not send message b/c no data channel is set!")
+            }
         }
     }
 }

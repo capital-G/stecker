@@ -20,7 +20,6 @@ struct JoinRoomData {
     join_room: String,
 }
 
-
 pub struct APIClient {
     pub host: String,
 }

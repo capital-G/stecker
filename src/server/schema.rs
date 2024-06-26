@@ -1,9 +1,9 @@
 use crate::broadcast_room::BroadcastRoom;
-use shared::connections::SteckerWebRTCConnection;
+use shared::connections::{listen_for_data_channel, SteckerWebRTCConnection};
 use webrtc::dtls::conn;
 
 use std::sync::{Arc, Mutex};
-// use tokio::sync::Mutex;
+use tokio::sync::Mutex as AsyncMutex;
 use uuid::Uuid;
 
 use async_graphql::{Context, Object, Result, SimpleObject};
@@ -68,77 +68,33 @@ impl Mutation {
         let connection = SteckerWebRTCConnection::build_connection().await?;
         let response_offer = connection.respond_to_offer(offer).await?;
 
-        let c2 = Arc::new(connection);
+        let (reply, broadcast) = listen_for_data_channel(&connection.peer_connection).await;
 
-        // this is strange? we use a "constructor" method but pass self as an Arc?!
-        // is this hacky or is this how you do things in rust? can't arc self within a method
-        // therefore we do it like this?
-        let mut message_rx = SteckerWebRTCConnection::listen_for_data_channel(
-            c2.clone()
-        ).await;
+        let c2 = Arc::new(connection);
 
         let room = BroadcastRoom {
             name: name,
+            reply: reply.clone(),
+            broadcast,
             source_connection: c2.clone(),
             target_connections: Mutex::new(vec![]),
         };
 
-        let r2 = Arc::new(room);
+        let mut rooms = state.rooms.lock().await;
+        
+        let room_mutex = Arc::new(AsyncMutex::new(room));
+        rooms.insert(uuid.to_string(), room_mutex.clone());
+        
 
         tokio::spawn(async move {
-            // new idea: use a tokio:spawn to consume two mpsc
-            // a) new messages
-            // b) new source connections/data channels
-            // these connections can then be owned by this thread, making
-            // the mutex locks unnecessary :)
-
-            while let Some(msg) = message_rx.recv().await {
-                // this works :)
-                println!("Received something: {}", msg.clone());
-                // for c in r2.target_connections.lock().unwrap().iter() {
-                //     c.lock().unwrap().send_data_channel_message(&msg).await;
-                // };
-
+            let mut room_receiver = reply.subscribe();
+            
+            while let Ok(msg) = room_receiver.recv().await {
+                println!("Received something from a target (?): {}", msg.clone());
             }
         });
 
         return Ok(response_offer);
-
-
-        // let mut rooms = state.rooms.lock().await;
-        // let mut room = BroadcastRoom::create_new_room(name).await?;
-
-        // let (tx, mut rx) = tokio::sync::mpsc::channel::<String>(1);
-
-
-
-        // let new_connection = Connection::respond_to_offer(offer, Arc::new(tx)).await?;
-        // room.source_connection = Some(new_connection.connection);
-
-        // let room_mutex = Arc::new(Mutex::new(room));
-        // rooms.insert(uuid.to_string(), room_mutex.clone());
-
-        // tokio::spawn(async move {
-        //     while let Some(msg) = rx.recv().await {
-        //         for connection in room_mutex
-        //             .clone()
-        //             .lock()
-        //             .await
-        //             .target_connections
-        //             .lock()
-        //             .await
-        //             .iter()
-        //         {
-        //             if let Some(data_connection) = &connection.lock().await.data_channel {
-        //                 let _ = data_connection
-        //                     .send_text(&msg)
-        //                     .await;
-        //             }
-        //         }
-        //     }
-        // });
-
-        // Ok(new_connection.offer)
     }
 
     async fn join_room<'a>(
@@ -149,20 +105,42 @@ impl Mutation {
     ) -> Result<String> {
         let state = ctx.data_unchecked::<AppState>();
         let mut rooms = state.rooms.lock().await;
+        let  room = rooms.get_mut(&room_uuid);
 
-        let (tx, _rx) = tokio::sync::mpsc::channel::<String>(1);
+        if room.is_none() {
+            return Err("No such room {room_uuid}".into());
+        }
 
-        return Ok("".to_string());
+        let room = room.unwrap().lock().await;
+        
+        let mut room_rx = room.broadcast.subscribe();
+        let room_tx = room.reply.clone();
 
-        // if let Some(room) = rooms.get_mut(&room_uuid) {
-        //     let connection_offer = Connection::respond_to_offer(offer, Arc::new(tx)).await?;
-        //     room.lock()
-        //         .await
-        //         .join_room(connection_offer.connection)
-        //         .await;
-        //     Ok(connection_offer.offer)
-        // } else {
-        //     Err("Found no room with the given UUID".into())
-        // }
+        let connection = SteckerWebRTCConnection::build_connection().await?;
+        let response_offer = connection.respond_to_offer(offer).await?;
+        let (reply, broadcast) = listen_for_data_channel(&connection.peer_connection).await;
+
+        // Listen to client messages and pass them to the room (not broadcasted)
+        tokio::spawn(async move {
+            let mut client_receiver = broadcast.subscribe();
+            
+            while let Ok(msg) = client_receiver.recv().await {
+                if let Err(err) = room_tx.send(msg) {
+                    println!("Failed forwarding message from target channel to room (?): {err}");
+                }
+            } 
+        });
+
+        // Listen to room messages and pass them to client
+        tokio::spawn(async move {    
+            while let Ok(msg) = room_rx.recv().await {
+                println!("Broadcasting Message: {msg}");
+                if let Err(err) = reply.send(msg) {
+                    println!("Failed forwarding message from room to target channel {err}");
+                }
+            }
+        });
+
+        Ok(response_offer)
     }
 }

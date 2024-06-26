@@ -16,8 +16,7 @@ use webrtc::{
     interceptor::registry::Registry,
     peer_connection::{
         configuration::RTCConfiguration, math_rand_alpha,
-        peer_connection_state::RTCPeerConnectionState,
-        RTCPeerConnection,
+        peer_connection_state::RTCPeerConnectionState, RTCPeerConnection,
     },
 };
 

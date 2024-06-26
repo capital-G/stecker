@@ -1,6 +1,5 @@
-
-use base64::Engine;
 use base64::prelude::BASE64_STANDARD;
+use base64::Engine;
 use webrtc::peer_connection::sdp::session_description::RTCSessionDescription;
 
 pub fn encode_offer(offer: RTCSessionDescription) -> anyhow::Result<String> {

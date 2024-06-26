@@ -4,7 +4,6 @@ use webrtc::{data_channel::RTCDataChannel, peer_connection::RTCPeerConnection};
 
 use crate::connections::SteckerWebRTCConnection;
 
-
 #[derive(Clone)]
 pub struct Connection {
     pub peer_connection: Arc<RTCPeerConnection>,

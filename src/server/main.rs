@@ -1,12 +1,12 @@
-pub mod schema;
 pub mod broadcast_room;
+pub mod schema;
 
 use shared::models;
 
 use std::{collections::HashMap, sync::Arc};
 
-use crate::schema::{Mutation, Query};
 use crate::broadcast_room::BroadcastRoom;
+use crate::schema::{Mutation, Query};
 
 use async_graphql::{http::GraphiQLSource, EmptySubscription, Schema};
 use async_graphql_axum::GraphQL;
@@ -44,8 +44,7 @@ async fn main() {
         .finish();
 
     let app = Router::new()
-        .route("/", get(graphiql)
-        .post_service(GraphQL::new(schema)))
+        .route("/", get(graphiql).post_service(GraphQL::new(schema)))
         .nest_service("/debug", ServeDir::new("./src/server/templates"));
 
     println!("GraphiQL IDE: http://127.0.0.1:8000");
