@@ -18,6 +18,7 @@ use webrtc::peer_connection::RTCPeerConnection;
 pub struct SteckerDataChannel {
     pub inbound: Sender<String>,
     pub outbound: Sender<String>,
+    pub close_trigger: Sender<()>,
 }
 
 pub struct SteckerWebRTCConnection {
@@ -143,10 +144,16 @@ impl SteckerWebRTCConnection {
         let inbound_msg_tx2 = inbound_msg_tx.clone();
         let outbound_msg_tx2 = outbound_msg_tx.clone();
 
+        let (close_trigger, _) = broadcast::channel::<()>(1);
+        let close_trigger2 = close_trigger.clone();
+
         self.peer_connection
             .on_data_channel(Box::new(move |d: Arc<RTCDataChannel>| {
-                d.on_close(Box::new(|| {
+                let close_trigger3 = close_trigger2.clone();
+
+                d.on_close(Box::new(move || {
                     println!("Data channel closed");
+                    let _ = close_trigger3.send(());
                     Box::pin(async {})
                 }));
 
@@ -185,6 +192,7 @@ impl SteckerWebRTCConnection {
         SteckerDataChannel {
             outbound: outbound_msg_tx,
             inbound: inbound_msg_tx,
+            close_trigger,
         }
     }
 
@@ -201,6 +209,9 @@ impl SteckerWebRTCConnection {
         let data_channel = self.peer_connection.create_data_channel(name, None).await?;
         let d = data_channel.clone();
 
+        let (close_trigger, _) = broadcast::channel::<()>(1);
+        let close_trigger2 = close_trigger.clone();
+
         data_channel.on_open(Box::new(move || {
             println!("Opened data channel '{}'-'{}' open.", d.label(), d.id());
 
@@ -208,6 +219,11 @@ impl SteckerWebRTCConnection {
             d2.on_message(Box::new(move |msg: DataChannelMessage| {
                 let msg_str = String::from_utf8(msg.data.to_vec()).unwrap();
                 let _ = inbound_msg_tx2.send(msg_str);
+                Box::pin(async {})
+            }));
+
+            d2.on_close(Box::new(move || {
+                let _ = close_trigger2.send(());
                 Box::pin(async {})
             }));
 
@@ -239,6 +255,7 @@ impl SteckerWebRTCConnection {
         Ok(SteckerDataChannel {
             outbound: outbound_msg_tx,
             inbound: inbound_msg_tx,
+            close_trigger,
         })
     }
 }
