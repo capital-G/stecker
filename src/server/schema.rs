@@ -67,14 +67,14 @@ impl Mutation {
         let connection = SteckerWebRTCConnection::build_connection().await?;
         let response_offer = connection.respond_to_offer(offer).await?;
 
-        let (reply, broadcast) = connection.listen_for_data_channel().await;
+        let stecker_data_channel = connection.listen_for_data_channel().await;
 
         let c2 = Arc::new(connection);
 
         let room = BroadcastRoom {
             name: name,
-            reply: reply.clone(),
-            broadcast,
+            reply: stecker_data_channel.outbound.clone(),
+            broadcast: stecker_data_channel.inbound,
             source_connection: c2.clone(),
             target_connections: Mutex::new(vec![]),
         };
@@ -84,13 +84,13 @@ impl Mutation {
         let room_mutex = Arc::new(AsyncMutex::new(room));
         rooms.insert(uuid.to_string(), room_mutex.clone());
 
-        tokio::spawn(async move {
-            let mut room_receiver = reply.subscribe();
+        // tokio::spawn(async move {
+        //     let mut room_receiver = stecker_data_channel.outbound.subscribe();
 
-            while let Ok(msg) = room_receiver.recv().await {
-                println!("Received something from a target (?): {}", msg.clone());
-            }
-        });
+        //     while let Ok(msg) = room_receiver.recv().await {
+        //         println!("Should send something to the broadcast source connection: {msg}");
+        //     }
+        // });
 
         return Ok(response_offer);
     }
@@ -111,19 +111,21 @@ impl Mutation {
 
         let connection = SteckerWebRTCConnection::build_connection().await?;
         let response_offer = connection.respond_to_offer(offer).await?;
-        let (reply, broadcast) = connection.listen_for_data_channel().await;
+        let stecker_data_channel = connection.listen_for_data_channel().await;
 
         let room = room.unwrap().lock().await;
 
-        let mut room_rx = room.broadcast.subscribe();
-        let room_tx = room.reply.clone();
+        let room_rx = room.broadcast.clone();
+        // let room_tx = room.reply.clone();
 
         // Listen to client messages and pass them to the room (not broadcasted)
         tokio::spawn(async move {
-            let mut client_receiver = broadcast.subscribe();
+            // let mut client_receiver = broadcast.subscribe();
+            let mut room_receiver = room_rx.subscribe();
 
-            while let Ok(msg) = client_receiver.recv().await {
-                if let Err(err) = room_tx.send(msg) {
+            while let Ok(msg) = room_receiver.recv().await {
+                println!("Received a message to be distributed: {msg}");
+                if let Err(err) = stecker_data_channel.outbound.send(msg) {
                     println!("Failed forwarding message from target channel to room (?): {err}");
                 }
             }
@@ -131,11 +133,11 @@ impl Mutation {
 
         // Listen to room messages and pass them to client
         tokio::spawn(async move {
-            while let Ok(msg) = room_rx.recv().await {
-                println!("Broadcasting Message: {msg}");
-                if let Err(err) = reply.send(msg) {
-                    println!("Failed forwarding message from room to target channel {err}");
-                }
+            while let Ok(msg) = stecker_data_channel.inbound.subscribe().recv().await {
+                println!("Broadcasting message from subscriber - will be ignored: {msg}");
+                // if let Err(err) = room.send(msg) {
+                //     println!("Failed forwarding message from room to target channel {err}");
+                // }
             }
         });
 

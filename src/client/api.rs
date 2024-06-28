@@ -1,3 +1,4 @@
+use anyhow::bail;
 use serde::Deserialize;
 use serde_json::json;
 use shared::utils::decode_b64;
@@ -37,6 +38,7 @@ impl APIClient {
                 "offer": local_session_description,
             }
         });
+
         let client = reqwest::Client::new();
         let res = client
             .post(&self.host)
@@ -45,12 +47,18 @@ impl APIClient {
             .body(query.to_string())
             .send()
             .await?;
-        let results = res.json::<GQLResponse<CreateRoomData>>().await?;
-        println!("Response from server: {results:?}");
-        let desc_data = decode_b64(results.data.create_room.as_str())?;
-        let answer = serde_json::from_str::<RTCSessionDescription>(&desc_data)?;
 
-        Ok(answer)
+        match res.json::<GQLResponse<CreateRoomData>>().await {
+            Ok(result) => {
+                println!("Response from server: {result:?}");
+                let desc_data = decode_b64(result.data.create_room.as_str())?;
+                let answer = serde_json::from_str::<RTCSessionDescription>(&desc_data)?;
+                return Ok(answer);
+            }
+            Err(msg) => {
+                bail!("Received unexpected response from server: {msg}")
+            }
+        }
     }
 
     pub async fn join_room(
@@ -65,6 +73,18 @@ impl APIClient {
                 "offer": local_session_description,
             }
         });
+
+        let client2 = reqwest::Client::new();
+        let res2 = client2
+            .post(&self.host)
+            .header("Content-Type", "application/json")
+            .header("Accept", "application/json")
+            .body(query.to_string())
+            .send()
+            .await?;
+        let foo = res2.text().await?;
+        println!("Server response is {foo}");
+
         let client = reqwest::Client::new();
         let res = client
             .post(&self.host)
