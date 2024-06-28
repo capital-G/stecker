@@ -1,34 +1,51 @@
-use std::{env, time::Duration};
+use std::time::Duration;
 
 mod api;
 
 use api::APIClient;
 use shared::connections::SteckerWebRTCConnection;
 use webrtc::peer_connection::math_rand_alpha;
+use clap::{Parser, Subcommand};
 
 const HOST: &str = "http://127.0.0.1:8000";
 
-#[tokio::main]
-async fn main() {
-    let args: Vec<String> = env::args().collect();
+#[derive(Parser)]
+#[command(version, about, long_about = None)]
+struct Cli {
+    #[command(subcommand)]
+    command: Option<Commands>,
+}
 
-    match args.get(1) {
-        Some(uuid) => match run_to_join(uuid).await {
-            Ok(_) => println!("this was the client that joined {uuid}"),
-            Err(err) => println!("ERR running client: {err}"),
-        },
-        None => match run_to_create().await {
-            Ok(_) => {
-                println!("this was the client")
-            }
-            Err(err) => {
-                println!("ERR running client: {err}")
-            }
-        },
+#[derive(Subcommand)]
+enum Commands {
+    /// create a new broadcast room
+    CreateRoom {
+        /// name of the new room
+        name: String,
+    },
+    /// join an existing broadcast room
+    JoinRoom {
+        /// uuid of the room to join
+        uuid: String
     }
 }
 
-async fn run_to_create() -> anyhow::Result<()> {
+#[tokio::main]
+async fn main() {
+    let cli = Cli::parse();
+
+    match &cli.command {
+        Some(Commands::CreateRoom { name }) => {
+            let _ = create_room(name).await;
+        }
+        Some(Commands::JoinRoom { uuid }) => {
+            let _ = join_room(uuid).await;
+        }
+        None => {}
+    }
+}
+
+async fn create_room(name: &str) -> anyhow::Result<()> {
     let (_, mut done_rx) = tokio::sync::mpsc::channel::<()>(1);
 
     let connection = SteckerWebRTCConnection::build_connection().await?;
@@ -55,7 +72,7 @@ async fn run_to_create() -> anyhow::Result<()> {
         host: HOST.to_string(),
     };
 
-    match api_client.create_room("foo", &offer).await {
+    match api_client.create_room(name, &offer).await {
         Ok(answer) => {
             // Apply the answer as the remote description
             connection.set_remote_description(answer).await?;
@@ -78,7 +95,7 @@ async fn run_to_create() -> anyhow::Result<()> {
     }
 }
 
-async fn run_to_join(uuid: &str) -> anyhow::Result<()> {
+async fn join_room(uuid: &str) -> anyhow::Result<()> {
     let (_, mut done_rx) = tokio::sync::mpsc::channel::<()>(1);
 
     let connection = SteckerWebRTCConnection::build_connection().await?;
