@@ -29,7 +29,7 @@ async fn main() {
 }
 
 async fn run_to_create() -> anyhow::Result<()> {
-    let (done_tx, mut done_rx) = tokio::sync::mpsc::channel::<()>(1);
+    let (_, mut done_rx) = tokio::sync::mpsc::channel::<()>(1);
 
     let connection = SteckerWebRTCConnection::build_connection().await?;
     let stecker_data_channel = connection.create_data_channel("foo").await?;
@@ -79,7 +79,7 @@ async fn run_to_create() -> anyhow::Result<()> {
 }
 
 async fn run_to_join(uuid: &str) -> anyhow::Result<()> {
-    let (done_tx, mut done_rx) = tokio::sync::mpsc::channel::<()>(1);
+    let (_, mut done_rx) = tokio::sync::mpsc::channel::<()>(1);
 
     let connection = SteckerWebRTCConnection::build_connection().await?;
     let stecker_data_channel = connection.create_data_channel("foo").await?;

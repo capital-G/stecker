@@ -231,11 +231,11 @@ impl SteckerWebRTCConnection {
                 let d3 = d2.clone();
                 let mut result = anyhow::Result::<usize>::Ok(0);
 
-                let mut recveiver = outbound_msg_tx2.subscribe();
+                let mut receiver = outbound_msg_tx2.subscribe();
 
                 while result.is_ok() {
                     tokio::select! {
-                        msg_to_send = recveiver.recv() => {
+                        msg_to_send = receiver.recv() => {
                             match msg_to_send {
                                 Ok(m) => {
                                     println!("I will now send out {m}");
