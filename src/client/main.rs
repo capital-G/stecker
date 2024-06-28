@@ -96,8 +96,6 @@ async fn create_room(name: &str) -> anyhow::Result<()> {
 }
 
 async fn join_room(uuid: &str) -> anyhow::Result<()> {
-    let (_, mut done_rx) = tokio::sync::mpsc::channel::<()>(1);
-
     let connection = SteckerWebRTCConnection::build_connection().await?;
     let stecker_data_channel = connection.create_data_channel("foo").await?;
     let offer = connection.create_offer().await?;
@@ -124,9 +122,10 @@ async fn join_room(uuid: &str) -> anyhow::Result<()> {
             });
 
             println!("Press ctrl-c to stop");
+            let mut close_receiver = stecker_data_channel.close_trigger.clone().subscribe();
             tokio::select! {
-                _ = done_rx.recv() => {
-                    println!("received done signal!");
+                _ = close_receiver.recv() => {
+                    println!("received close signal!");
                 }
                 _ = tokio::signal::ctrl_c() => {
                     println!();
