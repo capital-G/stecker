@@ -1,13 +1,64 @@
 {
-    "version": 3,
+    "version": 6,
     "configurePresets": [
         {
-            "name": "macOS",
+            "name": "default",
+            "hidden": true,
+            "installDir": "install",
             "binaryDir": "${sourceDir}/build/",
-            "generator": "Xcode",
             "cacheVariables": {
                 "SC_SRC_PATH": "$env{SC_SRC_PATH}"
             }
+        },
+        {
+            "name": "macOS",
+            "inherits": "default",
+            "generator": "Xcode"
+        },
+        {
+            "name": "Linux",
+            "inherits": "default",
+            "generator": "Unix Makefiles"
+        }
+    ],
+    "buildPresets": [
+        {
+            "name": "macOS",
+            "configurePreset": "macOS",
+            "targets": ["install"]
+        },
+        {
+            "name": "Linux",
+            "configurePreset": "Linux",
+            "targets": ["install"]
+        }
+    ],
+    "workflowPresets": [
+        {
+            "name": "macOS",
+            "steps": [
+                {
+                    "type": "configure",
+                    "name": "macOS"
+                },
+                {
+                    "type": "build",
+                    "name": "macOS"
+                }
+            ]
+        },
+        {
+            "name": "Linux",
+            "steps": [
+                {
+                    "type": "configure",
+                    "name": "Linux"
+                },
+                {
+                    "type": "build",
+                    "name": "Linux"
+                }
+            ]
         }
     ]
 }

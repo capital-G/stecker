@@ -35,4 +35,9 @@ target_include_directories(SuperStecker PUBLIC ${SC_SRC_PATH}/common)
 
 target_link_libraries(SuperStecker PUBLIC stecker_rs)
 
-set_target_properties(SuperStecker PROPERTIES SUFFIX ".scx")
+if(NOT CMAKE_INSTALL_PREFIX)
+  set(CMAKE_INSTALL_PREFIX ${PROJECT_SOURCE_DIR}/install)
+endif()
+
+install(TARGETS SuperStecker LIBRARY DESTINATION ${PROJECT_NAME})
+install(FILES src/SuperStecker.sc DESTINATION ${PROJECT_NAME}/Classes)
