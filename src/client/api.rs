@@ -1,4 +1,5 @@
 use anyhow::bail;
+use reqwest::StatusCode;
 use serde::Deserialize;
 use serde_json::json;
 use shared::utils::decode_b64;
@@ -74,17 +75,6 @@ impl APIClient {
             }
         });
 
-        let client2 = reqwest::Client::new();
-        let res2 = client2
-            .post(&self.host)
-            .header("Content-Type", "application/json")
-            .header("Accept", "application/json")
-            .body(query.to_string())
-            .send()
-            .await?;
-        let foo = res2.text().await?;
-        println!("Server response is {foo}");
-
         let client = reqwest::Client::new();
         let res = client
             .post(&self.host)
@@ -93,12 +83,17 @@ impl APIClient {
             .body(query.to_string())
             .send()
             .await?;
-        println!("{res:?}");
-        match res.json::<GQLResponse<JoinRoomData>>().await {
+        let status_code = res.status();
+        let text = res.text().await?;
+
+        if status_code != StatusCode::OK {
+            bail!("Join room request failed (status code {status_code}): Response was {text}");
+        }
+
+        match serde_json::from_str::<GQLResponse<JoinRoomData>>(&text) {
             Ok(results) => {
                 let desc_data = decode_b64(results.data.join_room.as_str())?;
                 let answer = serde_json::from_str::<RTCSessionDescription>(&desc_data)?;
-
                 Ok(answer)
             }
             Err(err) => {
