@@ -8,6 +8,15 @@
             "cacheVariables": {
                 "SC_SRC_PATH": "$env{SC_SRC_PATH}"
             }
+        },
+        {
+            "name": "Linux",
+            "binaryDir": "${sourceDir}/build/",
+            "generator": "Unix Makefiles",
+            "cacheVariables": {
+                "SC_SRC_PATH": "$env{SC_SRC_PATH}"
+            }
         }
+
     ]
 }

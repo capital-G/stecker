@@ -34,5 +34,3 @@ target_include_directories(SuperStecker PUBLIC ${SC_SRC_PATH}/include/common)
 target_include_directories(SuperStecker PUBLIC ${SC_SRC_PATH}/common)
 
 target_link_libraries(SuperStecker PUBLIC stecker_rs)
-
-set_target_properties(SuperStecker PROPERTIES SUFFIX ".scx")
