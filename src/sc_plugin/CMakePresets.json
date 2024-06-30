@@ -1,0 +1,13 @@
+{
+    "version": 3,
+    "configurePresets": [
+        {
+            "name": "macOS",
+            "binaryDir": "${sourceDir}/build/",
+            "generator": "Xcode",
+            "cacheVariables": {
+                "SC_SRC_PATH": "$env{SC_SRC_PATH}"
+            }
+        }
+    ]
+}

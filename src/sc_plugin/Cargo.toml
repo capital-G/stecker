@@ -1,0 +1,14 @@
+[package]
+name = "stecker_sc"
+edition = "2021"
+version = "0.1.0"
+
+[dependencies]
+cxx = { version = "1.0.124", features = ["c++17"] }
+# shared = { path = "../shared" }
+
+[build-dependencies]
+cxx-build = "1.0"
+
+[lib]
+crate-type = ["staticlib"]

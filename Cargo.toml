@@ -3,6 +3,7 @@ resolver = "2"
 
 members = [
     "src/client",
+    "src/sc_plugin",
     "src/server",
     "src/shared",
 ]
