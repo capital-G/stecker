@@ -3,9 +3,9 @@ use std::time::Duration;
 mod api;
 
 use api::APIClient;
+use clap::{Parser, Subcommand};
 use shared::connections::SteckerWebRTCConnection;
 use webrtc::peer_connection::math_rand_alpha;
-use clap::{Parser, Subcommand};
 
 const HOST: &str = "http://127.0.0.1:8000";
 
@@ -26,8 +26,8 @@ enum Commands {
     /// join an existing broadcast room
     JoinRoom {
         /// uuid of the room to join
-        uuid: String
-    }
+        uuid: String,
+    },
 }
 
 #[tokio::main]
