@@ -1,13 +1,36 @@
+pub struct Room {
+    name: String,
+}
+
+impl Room {
+    pub fn new(name: &str) -> Self {
+        Room {
+            name: name.to_string(),
+        }
+    }
+
+    pub fn recv_message(&self) -> f32 {
+        let name = &self.name;
+        println!("room name is {name}");
+        32.
+    }
+}
+
 #[no_mangle]
-pub extern "C" fn recv_message(room_name: &str) -> f32 {
-    println!("room name is {room_name}");
-    32.
+pub extern "C" fn create_room(name: &str) -> Box<Room> {
+    Box::new(Room::new(name))
+}
+
+#[no_mangle]
+pub extern "C" fn recv_message(room: &Room) -> f32 {
+    room.recv_message()
 }
 
 #[cxx::bridge]
 mod ffi {
-
     extern "Rust" {
-        fn recv_message(room_name: &str) -> f32;
+        type Room;
+        fn create_room(name: &str) -> Box<Room>;
+        fn recv_message(room: &Room) -> f32;
     }
 }

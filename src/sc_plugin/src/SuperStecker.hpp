@@ -2,6 +2,7 @@
 
 #include "SC_PlugIn.hpp"
 #include "stecker_rs/lib.h"
+#include "rust/cxx.h"
 
 namespace SuperStecker {
 
@@ -15,11 +16,11 @@ public:
 private:
     // Calc function
     void next_k(int nSamples);
-    void extractRoomName();
+    rust::Str extractRoomName();
 
     // Member variables
-    int m_roomNameSize;
     char* m_roomName;
+    std::unique_ptr<rust::Box<Room>> m_room;
 };
 
 } // namespace SuperStecker

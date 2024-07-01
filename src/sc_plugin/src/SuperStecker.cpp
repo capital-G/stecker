@@ -7,16 +7,22 @@ static InterfaceTable *ft;
 namespace SuperStecker
 {
 
-    SuperStecker::SuperStecker() {
+    SuperStecker::SuperStecker() : m_room(nullptr) {
         mCalcFunc = make_calc_function<SuperStecker, &SuperStecker::next_k>();
+
         extractRoomName();
+        // smart ptr allows us to delay the initialization of room
+        m_room = std::make_unique<rust::Box<Room>>(create_room(
+            extractRoomName()
+        ));
+
         next_k(1);
     }
 
-    void SuperStecker::extractRoomName() {
+    rust::Str SuperStecker::extractRoomName() {
         // stolen from SendReply UGen
         const int kVarOffset = 1;
-        m_roomNameSize = in0(0);
+        int m_roomNameSize = in0(0);
 
         // +1 b/c of null termination
         const int cmdRoomNameAllocSize = (m_roomNameSize + 1) * sizeof(char);
@@ -30,10 +36,13 @@ namespace SuperStecker
         }
         // terminate string
         m_roomName[m_roomNameSize] = 0;
+
+        return rust::Str(m_roomName, m_roomNameSize);
     }
 
     void SuperStecker::next_k(int nSamples) {
-        float msg = recv_message(rust::Str(m_roomName, m_roomNameSize));
+        // rust::Str(m_roomName, m_roomNameSize)
+        float msg = recv_message(**m_room);
         out0(0) = msg;
     }
 
