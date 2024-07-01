@@ -15,8 +15,11 @@ public:
 private:
     // Calc function
     void next_k(int nSamples);
+    void extractRoomName();
 
     // Member variables
+    int m_roomNameSize;
+    char* m_roomName;
 };
 
 } // namespace SuperStecker

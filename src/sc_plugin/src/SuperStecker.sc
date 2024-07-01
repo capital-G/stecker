@@ -1,9 +1,14 @@
 SuperStecker : UGen {
-	*kr {
-		^this.multiNew('control');
+	*kr {|roomName|
+		^this.new1('control', roomName);
 	}
+
 	checkInputs {
-		/* TODO */
 		^this.checkValidInputs;
+	}
+
+	*new1 {|rate,roomName|
+		var ascii = roomName.ascii;
+		^super.new1(*[rate, ascii.size].addAll(ascii));
 	}
 }
