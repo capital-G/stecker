@@ -78,8 +78,6 @@ impl Mutation {
 
         let stecker_data_channel = connection.listen_for_data_channel().await;
 
-        let c2 = Arc::new(connection);
-
         let room = BroadcastRoom {
             name: name.clone(),
             reply: stecker_data_channel.outbound.clone(),
