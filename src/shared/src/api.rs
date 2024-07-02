@@ -1,8 +1,8 @@
+use crate::utils::decode_b64;
 use anyhow::bail;
 use reqwest::StatusCode;
 use serde::Deserialize;
 use serde_json::json;
-use shared::utils::decode_b64;
 use webrtc::peer_connection::sdp::session_description::RTCSessionDescription;
 
 #[derive(Deserialize, Debug)]

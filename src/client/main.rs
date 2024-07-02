@@ -1,9 +1,7 @@
 use std::time::Duration;
 
-mod api;
-
-use api::APIClient;
 use clap::{Parser, Subcommand};
+use shared::api::APIClient;
 use shared::connections::SteckerWebRTCConnection;
 use webrtc::peer_connection::math_rand_alpha;
 
