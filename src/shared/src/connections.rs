@@ -1,6 +1,7 @@
 use crate::utils::{decode_b64, encode_offer};
 
 use std::sync::Arc;
+use bytes::{Buf, BufMut, BytesMut};
 use tokio::sync::broadcast;
 use tokio::sync::broadcast::Sender;
 use tokio::sync::Mutex;
@@ -15,11 +16,40 @@ use webrtc::peer_connection::configuration::RTCConfiguration;
 use webrtc::peer_connection::sdp::session_description::RTCSessionDescription;
 use webrtc::peer_connection::RTCPeerConnection;
 
-pub struct SteckerDataChannel {
-    pub inbound: Sender<String>,
-    pub outbound: Sender<String>,
+pub trait DataSender<T> {
+    fn send_stecker_data(&self, data: T) -> impl std::future::Future<Output = Result<usize, webrtc::Error>> + Send; 
+    fn convert_stecker_data(&self, message: DataChannelMessage) -> anyhow::Result<T>;
+}
+pub struct SteckerDataChannel<T> {
+    pub inbound: Sender<T>,
+    pub outbound: Sender<T>,
     pub close_trigger: Sender<()>,
 }
+
+impl DataSender<String> for RTCDataChannel {
+    async fn send_stecker_data(&self, data: String) -> Result<usize, webrtc::Error> {
+        self.send_text(data).await
+    }
+
+    fn convert_stecker_data(&self, message: DataChannelMessage) -> anyhow::Result<String> {
+        Ok(String::from_utf8(message.data.to_vec())?)
+    }
+}
+
+impl DataSender<f32> for RTCDataChannel {
+    async fn send_stecker_data(&self, data: f32) -> Result<usize, webrtc::Error> {
+        let mut b = BytesMut::with_capacity(4);
+        b.put_f32(data);
+        let b2 = b.freeze();
+        self.send(&b2).await
+    }
+
+    fn convert_stecker_data(&self, message: DataChannelMessage) -> anyhow::Result<f32> {
+        let mut data = message.data.clone();
+        Ok(data.get_f32())
+    }
+}
+
 
 pub struct SteckerWebRTCConnection {
     // FIXME: potentially both fields are obsolete
@@ -135,11 +165,15 @@ impl SteckerWebRTCConnection {
     }
 
     // other party builds data channel and we listen for it
-    pub async fn listen_for_data_channel(&self) -> SteckerDataChannel {
+    pub async fn listen_for_data_channel<T>(&self) -> SteckerDataChannel::<T>
+    where
+        RTCDataChannel: DataSender<T>, 
+        T: 'static + Send + Sync + Clone,
+     {
         // messages received from data channel are inbound,
         // messages send to data channel are outbound
-        let (inbound_msg_tx, _) = broadcast::channel::<String>(2);
-        let (outbound_msg_tx, _) = broadcast::channel::<String>(2);
+        let (inbound_msg_tx, _) = broadcast::channel::<T>(2);
+        let (outbound_msg_tx, _) = broadcast::channel::<T>(2);
 
         let inbound_msg_tx2 = inbound_msg_tx.clone();
         let outbound_msg_tx2 = outbound_msg_tx.clone();
@@ -164,9 +198,11 @@ impl SteckerWebRTCConnection {
 
                 let inbound_msg_tx3 = inbound_msg_tx2.clone();
 
+                let d2 = d.clone();
+
                 d.on_message(Box::new(move |message: DataChannelMessage| {
-                    let msg_str = String::from_utf8(message.data.to_vec()).unwrap();
-                    let _ = inbound_msg_tx3.send(msg_str);
+                    let msg = d2.convert_stecker_data(message).unwrap();
+                    let _ = inbound_msg_tx3.send(msg);
                     Box::pin(async {})
                 }));
 
@@ -181,7 +217,7 @@ impl SteckerWebRTCConnection {
                         while result.is_ok() {
                             tokio::select! {
                                 Ok(msg_to_send) = outbound_msg_rx2.recv() => {
-                                    result = d2.send_text(msg_to_send).await.map_err(Into::into);
+                                    result = d2.send_stecker_data(msg_to_send).await.map_err(Into::into);
                                 },
                             }
                         }
@@ -197,11 +233,15 @@ impl SteckerWebRTCConnection {
     }
 
     // we build data channel, other party has to listen
-    pub async fn create_data_channel(&self, name: &str) -> anyhow::Result<SteckerDataChannel> {
+    pub async fn create_data_channel<T>(&self, name: &str) -> anyhow::Result<SteckerDataChannel<T>>
+    where
+        RTCDataChannel: DataSender<T>, 
+        T: 'static + Send + Sync + Clone,
+     {
         // messages received from data channel are inbound,
         // messages send to data channel are outbound
-        let (inbound_msg_tx, _) = broadcast::channel::<String>(2);
-        let (outbound_msg_tx, _) = broadcast::channel::<String>(2);
+        let (inbound_msg_tx, _) = broadcast::channel::<T>(2);
+        let (outbound_msg_tx, _) = broadcast::channel::<T>(2);
 
         let inbound_msg_tx2 = inbound_msg_tx.clone();
         let outbound_msg_tx2 = outbound_msg_tx.clone();
@@ -216,9 +256,10 @@ impl SteckerWebRTCConnection {
             println!("Opened data channel '{}'-'{}' open.", d.label(), d.id());
 
             let d2 = d.clone();
-            d2.on_message(Box::new(move |msg: DataChannelMessage| {
-                let msg_str = String::from_utf8(msg.data.to_vec()).unwrap();
-                let _ = inbound_msg_tx2.send(msg_str);
+            let d3 = d.clone();
+            d2.on_message(Box::new(move |message: DataChannelMessage| {
+                let msg = d3.convert_stecker_data(message).unwrap();
+                let _ = inbound_msg_tx2.send(msg);
                 Box::pin(async {})
             }));
 
@@ -238,8 +279,7 @@ impl SteckerWebRTCConnection {
                         msg_to_send = receiver.recv() => {
                             match msg_to_send {
                                 Ok(m) => {
-                                    println!("I will now send out {m}");
-                                    result = d3.send_text(m).await.map_err(Into::into);
+                                    result = d3.send_stecker_data(m).await.map_err(Into::into);
                                 },
                                 Err(e) => {
                                     println!("Failed to send message to data channel: {e}");

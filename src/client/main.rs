@@ -90,7 +90,7 @@ async fn create_room(name: &str) -> anyhow::Result<()> {
 
 async fn join_room(name: &str) -> anyhow::Result<()> {
     let connection = SteckerWebRTCConnection::build_connection().await?;
-    let stecker_data_channel = connection.create_data_channel("foo").await?;
+    let stecker_data_channel = connection.create_data_channel::<String>("foo").await?;
     let offer = connection.create_offer().await?;
 
     let api_client = APIClient {
