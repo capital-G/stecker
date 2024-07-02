@@ -1,7 +1,7 @@
 use crate::broadcast_room::BroadcastRoom;
 use shared::connections::SteckerWebRTCConnection;
 
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use tokio::sync::Mutex as AsyncMutex;
 use uuid::Uuid;
 
@@ -84,8 +84,6 @@ impl Mutation {
             name: name.clone(),
             reply: stecker_data_channel.outbound.clone(),
             broadcast: stecker_data_channel.inbound,
-            source_connection: c2.clone(),
-            target_connections: Mutex::new(vec![]),
             uuid: Uuid::new_v4(),
         };
 

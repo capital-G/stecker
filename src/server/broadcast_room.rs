@@ -12,8 +12,5 @@ pub struct BroadcastRoom {
     // Subscribe to this to receive messages from room
     // potentially not useful to send to this (unless you also become a broadcaster)
     pub broadcast: Sender<String>,
-    // potentially obsolete
-    pub source_connection: Arc<SteckerWebRTCConnection>,
-    pub target_connections: Mutex<Vec<Arc<Mutex<SteckerWebRTCConnection>>>>,
     pub uuid: Uuid,
 }
