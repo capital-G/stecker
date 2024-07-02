@@ -102,7 +102,7 @@ Alpine.store("stecker", {
   },
 
 
-  async joinRoom(uuid) {
+  async joinRoom(name) {
     let results = await fetch(this.HOST, {
       method: "POST",
       headers: {
@@ -110,18 +110,17 @@ Alpine.store("stecker", {
       },
       body: JSON.stringify({
         query: `
-          mutation joinRoom($uuid: String!, $offer:String!) {
-            joinRoom(roomUuid:$uuid, offer: $offer)
+          mutation joinRoom($name: String!, $offer:String!) {
+            joinRoom(name:$name, offer: $offer)
           }
           `,
           variables: {
-            uuid,
+            name,
             offer: s.localSessionDescription
           }
       }),
     });
     let rawResponse = await results.json();
-    console.log(rawResponse);
     this.remoteSessionDescription = rawResponse.data.joinRoom;
 
     this.pc.setRemoteDescription(new RTCSessionDescription(JSON.parse(atob(this.remoteSessionDescription))));

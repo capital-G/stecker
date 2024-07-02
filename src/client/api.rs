@@ -64,13 +64,13 @@ impl APIClient {
 
     pub async fn join_room(
         &self,
-        uuid: &str,
+        name: &str,
         local_session_description: &str,
     ) -> anyhow::Result<RTCSessionDescription> {
         let query = json!({
-            "query": "mutation joinRoom($uuid:String!, $offer:String!) { joinRoom(roomUuid:$uuid, offer:$offer) }",
+            "query": "mutation joinRoom($name:String!, $offer:String!) { joinRoom(name:$name, offer:$offer) }",
             "variables": {
-                "uuid": uuid,
+                "name": name,
                 "offer": local_session_description,
             }
         });

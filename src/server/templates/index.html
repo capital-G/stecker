@@ -15,7 +15,7 @@
                 <template x-for="room in $store.stecker.rooms">
                     <div>
                         <li>
-                            <button class="button" @click="$store.stecker.joinRoom(`${room.uuid}`)" x-bind:disabled="!$store.stecker.localSessionDescription" x-text="`Join room ${room.name}`"></button>
+                            <button class="button" @click="$store.stecker.joinRoom(`${room.name}`)" x-bind:disabled="!$store.stecker.localSessionDescription" x-text="`Join room ${room.name}`"></button>
                         </li>
                     </div>
                 </template>

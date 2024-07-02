@@ -33,11 +33,11 @@ impl Query {
         // map does not support async which is necessary due to async,
         // therefore we use this atrocity
         let mut results = Vec::with_capacity(rooms.len());
-        for (uuid, room) in rooms.iter() {
+        for (name, room) in rooms.iter() {
             let locked_room = room.lock().await;
             results.push(Room {
-                uuid: uuid.clone(),
-                name: locked_room.name.clone(),
+                uuid: locked_room.uuid.clone().into(),
+                name: name.clone(),
                 num_listeners: 0,
             });
         }
@@ -61,8 +61,17 @@ impl Mutation {
         name: String,
         offer: String,
     ) -> Result<String> {
-        let uuid = Uuid::new_v4();
         let state = ctx.data_unchecked::<AppState>();
+
+        {
+            // create a block b/c otherwise we run into deadlock with mutex
+            let mut rooms = state.rooms.lock().await;
+            let room = rooms.get_mut(&name);
+
+            if room.is_some() {
+                return Err("Room with name {name} already exists.".into());
+            }
+        }
 
         let connection = SteckerWebRTCConnection::build_connection().await?;
         let response_offer = connection.respond_to_offer(offer).await?;
@@ -72,25 +81,19 @@ impl Mutation {
         let c2 = Arc::new(connection);
 
         let room = BroadcastRoom {
-            name: name,
+            name: name.clone(),
             reply: stecker_data_channel.outbound.clone(),
             broadcast: stecker_data_channel.inbound,
             source_connection: c2.clone(),
             target_connections: Mutex::new(vec![]),
+            uuid: Uuid::new_v4(),
         };
 
-        let mut rooms = state.rooms.lock().await;
-
-        let room_mutex = Arc::new(AsyncMutex::new(room));
-        rooms.insert(uuid.to_string(), room_mutex.clone());
-
-        // tokio::spawn(async move {
-        //     let mut room_receiver = stecker_data_channel.outbound.subscribe();
-
-        //     while let Ok(msg) = room_receiver.recv().await {
-        //         println!("Should send something to the broadcast source connection: {msg}");
-        //     }
-        // });
+        {
+            let mut rooms = state.rooms.lock().await;
+            let room_mutex = Arc::new(AsyncMutex::new(room));
+            rooms.insert(name.clone(), room_mutex.clone());
+        }
 
         return Ok(response_offer);
     }
@@ -98,15 +101,15 @@ impl Mutation {
     async fn join_room<'a>(
         &self,
         ctx: &Context<'a>,
-        room_uuid: String,
+        name: String,
         offer: String,
     ) -> Result<String> {
         let state = ctx.data_unchecked::<AppState>();
         let mut rooms = state.rooms.lock().await;
-        let room = rooms.get_mut(&room_uuid);
+        let room = rooms.get_mut(&name);
 
         if room.is_none() {
-            return Err("No such room {room_uuid}".into());
+            return Err("No such room {name}".into());
         }
 
         let connection = SteckerWebRTCConnection::build_connection().await?;

@@ -25,8 +25,8 @@ enum Commands {
     },
     /// join an existing broadcast room
     JoinRoom {
-        /// uuid of the room to join
-        uuid: String,
+        /// name of the room to join
+        name: String,
     },
 }
 
@@ -38,16 +38,14 @@ async fn main() {
         Some(Commands::CreateRoom { name }) => {
             let _ = create_room(name).await;
         }
-        Some(Commands::JoinRoom { uuid }) => {
-            let _ = join_room(uuid).await;
+        Some(Commands::JoinRoom { name }) => {
+            let _ = join_room(name).await;
         }
         None => {}
     }
 }
 
 async fn create_room(name: &str) -> anyhow::Result<()> {
-    let (_, mut done_rx) = tokio::sync::mpsc::channel::<()>(1);
-
     let connection = SteckerWebRTCConnection::build_connection().await?;
     let stecker_data_channel = connection.create_data_channel("foo").await?;
     let offer = connection.create_offer().await?;
@@ -79,9 +77,6 @@ async fn create_room(name: &str) -> anyhow::Result<()> {
 
             println!("Press ctrl-c to stop");
             tokio::select! {
-                _ = done_rx.recv() => {
-                    println!("received done signal!");
-                }
                 _ = tokio::signal::ctrl_c() => {
                     println!();
                 }
@@ -95,7 +90,7 @@ async fn create_room(name: &str) -> anyhow::Result<()> {
     }
 }
 
-async fn join_room(uuid: &str) -> anyhow::Result<()> {
+async fn join_room(name: &str) -> anyhow::Result<()> {
     let connection = SteckerWebRTCConnection::build_connection().await?;
     let stecker_data_channel = connection.create_data_channel("foo").await?;
     let offer = connection.create_offer().await?;
@@ -104,7 +99,7 @@ async fn join_room(uuid: &str) -> anyhow::Result<()> {
         host: HOST.to_string(),
     };
 
-    match api_client.join_room(uuid, &offer).await {
+    match api_client.join_room(name, &offer).await {
         Ok(answer) => {
             // Apply the answer as the remote description
             connection.set_remote_description(answer).await?;

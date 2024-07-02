@@ -2,6 +2,7 @@ use std::sync::{Arc, Mutex};
 
 use shared::connections::SteckerWebRTCConnection;
 use tokio::sync::broadcast::Sender;
+use uuid::Uuid;
 
 pub struct BroadcastRoom {
     pub name: String,
@@ -14,4 +15,5 @@ pub struct BroadcastRoom {
     // potentially obsolete
     pub source_connection: Arc<SteckerWebRTCConnection>,
     pub target_connections: Mutex<Vec<Arc<Mutex<SteckerWebRTCConnection>>>>,
+    pub uuid: Uuid,
 }
