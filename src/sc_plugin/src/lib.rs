@@ -16,13 +16,11 @@ impl Room {
     }
 }
 
-#[no_mangle]
-pub extern "C" fn create_room(name: &str) -> Box<Room> {
+fn create_room(name: &str) -> Box<Room> {
     Box::new(Room::new(name))
 }
 
-#[no_mangle]
-pub extern "C" fn recv_message(room: &Room) -> f32 {
+fn recv_message(room: &Room) -> f32 {
     room.recv_message()
 }
 
