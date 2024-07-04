@@ -3,6 +3,7 @@
 #include "SC_PlugIn.hpp"
 #include "stecker_rs/lib.h"
 #include "rust/cxx.h"
+#include <memory>
 
 namespace SuperStecker {
 
