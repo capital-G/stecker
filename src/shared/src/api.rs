@@ -97,7 +97,7 @@ impl APIClient {
                 Ok(answer)
             }
             Err(err) => {
-                println!("ERR joinRoom response: {err}");
+                println!("ERR joinRoom response: {err}\n{text}");
                 Err(err.into())
             }
         }
