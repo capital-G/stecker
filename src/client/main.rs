@@ -56,9 +56,7 @@ async fn create_room(name: &str) -> anyhow::Result<()> {
 
             tokio::select! {
                 _ = timeout.as_mut() =>{
-                    let message = math_rand_alpha(15);
-                    println!("Sending '{message}'");
-                    let _ = stecker_data_channel.outbound.send(message);
+                    let _ = stecker_data_channel.outbound.send(42.);
                 }
             };
         }
@@ -90,7 +88,7 @@ async fn create_room(name: &str) -> anyhow::Result<()> {
 
 async fn join_room(name: &str) -> anyhow::Result<()> {
     let connection = SteckerWebRTCConnection::build_connection().await?;
-    let stecker_data_channel = connection.create_data_channel::<String>("foo").await?;
+    let stecker_data_channel = connection.create_data_channel::<f32>("foo").await?;
     let offer = connection.create_offer().await?;
 
     let api_client = APIClient {
