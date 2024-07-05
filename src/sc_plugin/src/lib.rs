@@ -19,7 +19,6 @@ const HOST: &str = "http://127.0.0.1:8000";
 
 impl Room {
     pub fn new(name: &str) -> Self {
-        let next_float = Arc::new(Mutex::new(0.0));
         let name2 = String::from_str(name).unwrap();
 
         let (sender, receiver) = broadcast::channel::<f32>(1);
@@ -84,7 +83,6 @@ impl Room {
 
         let room = Room {
             name: name.to_string(),
-            next_float: next_float.clone(),
             channel: receiver,
         };
 
