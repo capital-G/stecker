@@ -6,7 +6,8 @@ version = "0.1.0"
 [dependencies]
 cxx = { version = "1.0.124", features = ["c++17"] }
 tokio = { version = "1.36.0", features = ["full"] }
-# shared = { path = "../shared" }
+shared = { path = "../shared" }
+openssl = { version = "0.10", features = ["vendored"] }
 
 [build-dependencies]
 cxx-build = "1.0"

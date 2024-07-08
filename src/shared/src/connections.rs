@@ -1,7 +1,7 @@
 use crate::utils::{decode_b64, encode_offer};
 
-use std::sync::Arc;
 use bytes::{Buf, BufMut, BytesMut};
+use std::sync::Arc;
 use tokio::sync::broadcast;
 use tokio::sync::broadcast::Sender;
 use tokio::sync::Mutex;
@@ -17,7 +17,10 @@ use webrtc::peer_connection::sdp::session_description::RTCSessionDescription;
 use webrtc::peer_connection::RTCPeerConnection;
 
 pub trait DataSender<T> {
-    fn send_stecker_data(&self, data: T) -> impl std::future::Future<Output = Result<usize, webrtc::Error>> + Send; 
+    fn send_stecker_data(
+        &self,
+        data: T,
+    ) -> impl std::future::Future<Output = Result<usize, webrtc::Error>> + Send;
     fn convert_stecker_data(&self, message: DataChannelMessage) -> anyhow::Result<T>;
 }
 pub struct SteckerDataChannel<T> {
@@ -49,7 +52,6 @@ impl DataSender<f32> for RTCDataChannel {
         Ok(data.get_f32())
     }
 }
-
 
 pub struct SteckerWebRTCConnection {
     // FIXME: potentially both fields are obsolete
@@ -165,11 +167,11 @@ impl SteckerWebRTCConnection {
     }
 
     // other party builds data channel and we listen for it
-    pub async fn listen_for_data_channel<T>(&self) -> SteckerDataChannel::<T>
+    pub async fn listen_for_data_channel<T>(&self) -> SteckerDataChannel<T>
     where
-        RTCDataChannel: DataSender<T>, 
+        RTCDataChannel: DataSender<T>,
         T: 'static + Send + Sync + Clone,
-     {
+    {
         // messages received from data channel are inbound,
         // messages send to data channel are outbound
         let (inbound_msg_tx, _) = broadcast::channel::<T>(2);
@@ -235,9 +237,9 @@ impl SteckerWebRTCConnection {
     // we build data channel, other party has to listen
     pub async fn create_data_channel<T>(&self, name: &str) -> anyhow::Result<SteckerDataChannel<T>>
     where
-        RTCDataChannel: DataSender<T>, 
+        RTCDataChannel: DataSender<T>,
         T: 'static + Send + Sync + Clone,
-     {
+    {
         // messages received from data channel are inbound,
         // messages send to data channel are outbound
         let (inbound_msg_tx, _) = broadcast::channel::<T>(2);

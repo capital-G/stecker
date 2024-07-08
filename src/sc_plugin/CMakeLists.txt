@@ -19,6 +19,7 @@ FetchContent_MakeAvailable(Corrosion)
 corrosion_import_crate(
     MANIFEST_PATH Cargo.toml
     CRATE_TYPES staticlib
+    FLAGS "-vv"
     CRATES stecker_sc
 )
 
@@ -34,6 +35,14 @@ target_include_directories(SuperStecker PUBLIC ${SC_SRC_PATH}/include/common)
 target_include_directories(SuperStecker PUBLIC ${SC_SRC_PATH}/common)
 
 target_link_libraries(SuperStecker PUBLIC stecker_rs)
+
+if(APPLE)
+    # macOS only
+    # as per https://github.com/corrosion-rs/corrosion/issues/190
+    # we need to link to the Security and CoreFoundation Frameworks
+    # Otherwise we get undefined symbols during build
+    target_link_libraries(SuperStecker PRIVATE "-framework SystemConfiguration" "-framework CoreFoundation" "-framework Security")
+endif()
 
 if(NOT CMAKE_INSTALL_PREFIX)
   set(CMAKE_INSTALL_PREFIX ${PROJECT_SOURCE_DIR}/install)

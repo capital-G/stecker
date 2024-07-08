@@ -105,7 +105,7 @@ impl Mutation {
         let room = rooms.get_mut(&name);
 
         if room.is_none() {
-            return Err("No such room {name}".into());
+            return Err(format!("No such room {name}").into());
         }
 
         let connection = SteckerWebRTCConnection::build_connection().await?;
