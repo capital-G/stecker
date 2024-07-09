@@ -28,6 +28,10 @@ namespace SuperStecker
         return rust::Str(buff, strSize);
     }
 
+    SuperStecker::~SuperStecker() {
+        send_close_signal(**m_room);
+    }
+
     /*
     
     SuperStecker IN

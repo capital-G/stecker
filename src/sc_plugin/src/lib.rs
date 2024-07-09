@@ -11,6 +11,7 @@ pub struct Room {
     name: String,
     receiver: broadcast::Receiver<f32>,
     sender: broadcast::Sender<f32>,
+    close_sender: broadcast::Sender<()>,
     // we need to remember the last value pulled
     // from the queue
     last_value: f32,
@@ -25,6 +26,9 @@ impl Room {
 
         let (sender, _) = broadcast::channel::<f32>(1024);
         let sender2 = sender.clone();
+
+        let (close_sender, _) = broadcast::channel::<()>(1);
+        let mut sc_close_receiver = close_sender.subscribe();
 
         thread::spawn(move || {
             let rt = Runtime::new().unwrap();
@@ -42,7 +46,7 @@ impl Room {
                         connection.set_remote_description(answer).await.unwrap();
 
                         let mut inbound_receiver = stecker_data_channel.inbound.clone().subscribe();
-                        let mut close_receiver = stecker_data_channel.close_trigger.clone().subscribe();
+                        let mut webrtc_close_receiver = stecker_data_channel.close_trigger.clone().subscribe();
                         let mut consume = true;
 
                         while consume {
@@ -61,14 +65,18 @@ impl Room {
                                         Err(err) => println!("Error while receiving WebRTC message: {err}"),
                                     }
                                 },
-                                _ = close_receiver.recv() => {
-                                    println!("received close signal!");
+                                _ = webrtc_close_receiver.recv() => {
+                                    println!("received webrtc close signal!");
+                                    consume = false;
+                                }
+                                _ = sc_close_receiver.recv() => {
+                                    println!("Received supercollider close signal");
                                     consume = false;
                                 }
                             }
                         }
-                        println!("Close connection now");
                         connection.close().await.unwrap();
+                        println!("Close connection now");
                     }
                     Err(err) => {
                         println!("Some error joining room {err}");
@@ -82,6 +90,7 @@ impl Room {
             receiver: sender2.subscribe(),
             sender: sender2,
             last_value: -1.0,
+            close_sender,
         };
 
         room
@@ -95,6 +104,9 @@ impl Room {
         let sender2 = sender.clone();
         let receiver2 = sender2.clone().subscribe();
 
+        let (close_sender, _) = broadcast::channel::<()>(1);
+        let mut sc_close_receiver = close_sender.subscribe();
+
         thread::spawn(move || {
             let rt = Runtime::new().unwrap();
             rt.block_on(async {
@@ -106,7 +118,7 @@ impl Room {
 
                 tokio::spawn(async move {
                     let mut consume = true;
-                    let mut close_receiver = stecker_data_channel.close_trigger.clone().subscribe();
+                    let mut webrtc_close_receiver = stecker_data_channel.close_trigger.clone().subscribe();
 
                     while consume {
                         tokio::select! {
@@ -121,13 +133,12 @@ impl Room {
                                     },
                                 }
                             },
-                            _ = close_receiver.recv() => {
-                                println!("Received stop signal on pushing values to WebRTC");
+                            _ = webrtc_close_receiver.recv() => {
+                                println!("Received stop signal from webrtc on pushing values to WebRTC");
                                 consume = false;
-                            }
+                            },
                         };
                     }
-
                     println!("Stopped forwarding messages from SC to WebRTC");
                 });
 
@@ -138,11 +149,7 @@ impl Room {
                         connection.set_remote_description(answer).await?;
 
                         // @todo wait for actual stop signal here
-                        tokio::select! {
-                            _ = tokio::signal::ctrl_c() => {
-                                println!("Received");
-                            }
-                        };
+                        let _ = sc_close_receiver.recv().await;
 
                         println!("Close connection now");
                         connection.close().await?;
@@ -158,6 +165,7 @@ impl Room {
             receiver: receiver2,
             sender: sender2,
             last_value: -1.0,
+            close_sender,
         };
 
         room
@@ -205,6 +213,10 @@ fn send_message(room: &mut Room, value: f32) -> f32 {
     room.send_message(value)
 }
 
+fn send_close_signal(room: &mut Room) {
+    let _ = room.close_sender.send(());
+}
+
 #[cxx::bridge]
 mod ffi {
     extern "Rust" {
@@ -213,5 +225,6 @@ mod ffi {
         fn join_room(name: &str, host: &str) -> Box<Room>;
         fn recv_message(room: &mut Room) -> f32;
         fn send_message(room: &mut Room, value: f32) -> f32;
+        fn send_close_signal(room: &mut Room);
     }
 }

@@ -12,6 +12,7 @@ class SuperStecker : public SCUnit {
 public:
     rust::Str extractString(int lenIndex, int startIndex);
     std::unique_ptr<rust::Box<Room>> m_room;
+    ~SuperStecker();
 };
 
 class SuperSteckerIn : public SuperStecker {
