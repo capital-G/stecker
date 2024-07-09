@@ -48,19 +48,35 @@
 
             <button class="button is-link" @click="$store.stecker.createRoom(roomName)" x-bind:disabled="(roomName.length == 0) || $store.stecker.remoteSessionDescription!==null">Create room</button><br/>
 
-            <div class="field">
-                <label class="label">Message</label>
-                <div class="control">
-                    <input class="input" x-model="$store.stecker.message" :disabled="!$store.stecker.createdRoom"></input>
+
+            <div class="columns">
+                <div class="column">
+                    <div class="field">
+                        <label class="label">Message</label>
+                        <div class="control">
+                            <input class="input" x-model="$store.stecker.message" :disabled="!$store.stecker.createdRoom"></input>
+                        </div>
+                    </div>
+                    <button x-bind:disabled="!$store.stecker.createdRoom" class="button" @click="$store.stecker.sendMessage()">Send Message</button> <br />
                 </div>
-            </div>
-            <button x-bind:disabled="!$store.stecker.createdRoom" class="button" @click="$store.stecker.sendMessage()"> Send Message </button> <br />
+                <div class="column">
+                    <div class="field">
+                        <label class="label">Value</label>
+                        <div class="control">
+                            <input class="input" x-model="$store.stecker.value" :disabled="!$store.stecker.createdRoom"></input>
+                        </div>
+                    </div>
+                    <button x-bind:disabled="!$store.stecker.createdRoom" class="button" @click="$store.stecker.sendMessage()">Send value</button> <br />
+                </div>
         </div>
 
 
+        <h2>Log</h2>
         <div x-data>
             <template x-for="message in $store.stecker.messages">
-                <p x-text="message"><br/></p>
+                <article class="message">
+                    <div class="message-body" x-text="message"></div>
+                </article>
             </template>
         </div>
 

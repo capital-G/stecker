@@ -8,6 +8,7 @@ Alpine.store("stecker", {
   message: "",
   sendChannel: null,
   createdRoom: false,
+  value: null,
 
   pc: new RTCPeerConnection({
     iceServers: [
@@ -42,8 +43,10 @@ Alpine.store("stecker", {
     this.sendChannel = this.pc.createDataChannel("foo");
     this.sendChannel.onclose = () => this.log("sendChannel has closed");
     this.sendChannel.onopen = () => this.log("sendChannel has opened");
-    this.sendChannel.onmessage = (e) => {
-      this.log(`Message from DataChannel '${this.sendChannel.label}' payload '${e.data}'`);
+    this.sendChannel.onmessage = async (e) =>{
+      let dataView = new DataView(await e.data.arrayBuffer());
+      this.value = dataView.getFloat32();
+      // this.log(`Message from DataChannel '${this.sendChannel.label}' payload '${dataView.getFloat32()}'`);
     };
     
     this.pc.oniceconnectionstatechange = (e) => this.log(this.pc.iceConnectionState);
