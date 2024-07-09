@@ -17,7 +17,8 @@ namespace SuperStecker
         // necessary so ClearUnitIfMemFailed works
         Unit* unit = (Unit*) this;
         char* buff = (char*) RTAlloc(mWorld, allocSize);
-        ClearUnitIfMemFailed(buff);
+        // @todo this does not compile on linux :/
+        // ClearUnitIfMemFailed(buff);
 
         for (int i = 0; i < strSize; i++) {
             buff[i] = (char)in0(startIndex + i);
