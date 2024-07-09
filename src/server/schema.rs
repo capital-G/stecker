@@ -159,7 +159,7 @@ impl Mutation {
                         match raw_msg {
                             Ok(msg) => {println!("Broadcasting message from subscriber - will be ignored {msg}");},
                             Err(err) => {println!("Got errors when receiving inbound message: {err}")},
-                        } 
+                        }
                     },
                     _ = stop_receiver2.recv() => {
                         println!("Got triggered and stop consuming inbound messages now");
