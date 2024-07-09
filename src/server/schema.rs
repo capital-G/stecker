@@ -1,7 +1,7 @@
 use crate::broadcast_room::BroadcastRoom;
 use shared::connections::SteckerWebRTCConnection;
 
-use std::sync::Arc;
+use std::{collections::HashMap, sync::Arc};
 use tokio::sync::Mutex as AsyncMutex;
 use uuid::Uuid;
 
@@ -53,6 +53,12 @@ impl Mutation {
         let mut foo = ctx.data_unchecked::<AppState>().counter.lock().await;
         *foo += offset;
         *foo
+    }
+
+    async fn reset_rooms<'a>(&self, ctx: &Context<'a>) -> f32 {
+        let mut rooms = ctx.data_unchecked::<AppState>().rooms.lock().await;
+        *rooms = HashMap::new();
+        0.
     }
 
     async fn create_room<'a>(
