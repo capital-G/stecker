@@ -47,7 +47,7 @@ async fn main() {
 
     println!("GraphiQL IDE: http://127.0.0.1:8000");
 
-    axum::serve(TcpListener::bind("127.0.0.1:8000").await.unwrap(), app)
+    axum::serve(TcpListener::bind("0.0.0.0:8000").await.unwrap(), app)
         .await
         .unwrap();
 }
