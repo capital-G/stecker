@@ -116,6 +116,7 @@ impl Mutation {
 
         let room_rx = room.broadcast.clone();
         // let room_tx = room.reply.clone();
+        let close_trigger2 = stecker_data_channel.close_trigger.clone();
 
         // Listen to client messages and pass them to the room (not broadcasted)
         tokio::spawn(async move {
@@ -148,13 +149,22 @@ impl Mutation {
         });
 
         // Listen to room messages and pass them to client
+        let mut inbound_receiver = stecker_data_channel.inbound.subscribe();
+        let mut stop_receiver2 = close_trigger2.subscribe();
         tokio::spawn(async move {
-            loop {
-                while let Ok(msg) = stecker_data_channel.inbound.subscribe().recv().await {
-                    println!("Broadcasting message from subscriber - will be ignored: {msg}");
-                    // if let Err(err) = room.send(msg) {
-                    //     println!("Failed forwarding message from room to target channel {err}");
-                    // }
+            let mut consume = true;
+            while consume {
+                tokio::select! {
+                    raw_msg = inbound_receiver.recv() => {
+                        match raw_msg {
+                            Ok(msg) => {println!("Broadcasting message from subscriber - will be ignored {msg}");},
+                            Err(err) => {println!("Got errors when receiving inbound message: {err}")},
+                        } 
+                    },
+                    _ = stop_receiver2.recv() => {
+                        println!("Got triggered and stop consuming inbound messages now");
+                        consume = false;
+                    }
                 }
             }
         });
