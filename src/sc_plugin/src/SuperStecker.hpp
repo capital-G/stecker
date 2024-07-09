@@ -7,21 +7,23 @@
 
 namespace SuperStecker {
 
-class SuperSteckerIn : public SCUnit {
+class SuperStecker : public SCUnit {
+// needs to be public so it can be accessed by subclasses
+public:
+    rust::Str extractString(int lenIndex, int startIndex);
+    std::unique_ptr<rust::Box<Room>> m_room;
+};
+
+class SuperSteckerIn : public SuperStecker {
 public:
     SuperSteckerIn();
 
     // ~SuperSteckerIn();
-
 private:
     void next_k(int nSamples);
-    rust::Str extractRoomName();
-
-    char* m_roomName;
-    std::unique_ptr<rust::Box<Room>> m_room;
 };
 
-class SuperSteckerOut : public SCUnit {
+class SuperSteckerOut : public SuperStecker {
 public:
     SuperSteckerOut();
 
@@ -29,10 +31,6 @@ public:
 
 private:
     void next_k(int nSamples);
-    rust::Str extractRoomName();
-
-    char* m_roomName;
-    std::unique_ptr<rust::Box<Room>> m_room;
 };
 
 } // namespace SuperStecker

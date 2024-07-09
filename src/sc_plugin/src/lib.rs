@@ -16,12 +16,12 @@ pub struct Room {
     last_value: f32,
 }
 
-const HOST: &str = "http://127.0.0.1:8000";
 const DATA_CHANNEL_NAME: &str = "foo";
 
 impl Room {
-    pub fn join_room(name: &str) -> Self {
+    pub fn join_room(name: &str, host: &str) -> Self {
         let name2 = String::from_str(name).unwrap();
+        let host2 = String::from_str(host).unwrap();
 
         let (sender, _) = broadcast::channel::<f32>(1024);
         let sender2 = sender.clone();
@@ -34,7 +34,7 @@ impl Room {
                 let offer = connection.create_offer().await.unwrap();
 
                 let api_client = APIClient {
-                    host: HOST.to_string(),
+                    host: host2,
                 };
 
                 match api_client.join_room(&name2, &offer).await {
@@ -87,8 +87,9 @@ impl Room {
         room
     }
 
-    pub fn create_room(name: &str) -> Self {
+    pub fn create_room(name: &str, host: &str) -> Self {
         let name2 = String::from_str(name).unwrap();
+        let host2 = String::from_str(host).unwrap();
 
         let (sender, mut receiver) = broadcast::channel::<f32>(1024);
         let sender2 = sender.clone();
@@ -130,9 +131,7 @@ impl Room {
                     println!("Stopped forwarding messages from SC to WebRTC");
                 });
 
-                let api_client = APIClient {
-                    host: HOST.to_string(),
-                };
+                let api_client = APIClient { host: host2 };
 
                 match api_client.create_room(&name2, &offer).await {
                     Ok(answer) => {
@@ -190,12 +189,12 @@ impl Room {
     }
 }
 
-fn create_room(name: &str) -> Box<Room> {
-    Box::new(Room::create_room(name))
+fn create_room(name: &str, host: &str) -> Box<Room> {
+    Box::new(Room::create_room(name, host))
 }
 
-fn join_room(name: &str) -> Box<Room> {
-    Box::new(Room::join_room(name))
+fn join_room(name: &str, host: &str) -> Box<Room> {
+    Box::new(Room::join_room(name, host))
 }
 
 fn recv_message(room: &mut Room) -> f32 {
@@ -210,8 +209,8 @@ fn send_message(room: &mut Room, value: f32) -> f32 {
 mod ffi {
     extern "Rust" {
         type Room;
-        fn create_room(name: &str) -> Box<Room>;
-        fn join_room(name: &str) -> Box<Room>;
+        fn create_room(name: &str, host: &str) -> Box<Room>;
+        fn join_room(name: &str, host: &str) -> Box<Room>;
         fn recv_message(room: &mut Room) -> f32;
         fn send_message(room: &mut Room, value: f32) -> f32;
     }
