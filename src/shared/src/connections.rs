@@ -174,8 +174,8 @@ impl SteckerWebRTCConnection {
     {
         // messages received from data channel are inbound,
         // messages send to data channel are outbound
-        let (inbound_msg_tx, _) = broadcast::channel::<T>(2);
-        let (outbound_msg_tx, _) = broadcast::channel::<T>(2);
+        let (inbound_msg_tx, _) = broadcast::channel::<T>(1024);
+        let (outbound_msg_tx, _) = broadcast::channel::<T>(1024);
 
         let inbound_msg_tx2 = inbound_msg_tx.clone();
         let outbound_msg_tx2 = outbound_msg_tx.clone();
@@ -209,25 +209,34 @@ impl SteckerWebRTCConnection {
                 }));
 
                 let mut outbound_msg_rx2 = outbound_msg_tx2.clone().subscribe();
-
+                let mut close_trigger_receiver = close_trigger2.clone().subscribe();
                 Box::pin(async move {
-                    // if we do not spawn here the data connection will not get picked up!
+                    let mut consume = true;
                     tokio::spawn(async move {
                         let d2 = d.clone();
-                        let mut result = anyhow::Result::<usize>::Ok(0);
+                        let mut _result = anyhow::Result::<usize>::Ok(0);
 
-                        while result.is_ok() {
+                        while consume {
                             tokio::select! {
                                 msg_to_send = outbound_msg_rx2.recv() => {
                                     match msg_to_send {
                                         Ok(msg) => {
-                                            result = d2.send_stecker_data(msg).await.map_err(Into::into);
+                                            _result = d2.send_stecker_data(msg).await.map_err(Into::into);
                                         },
                                         Err(err) => {
-                                            println!("Error when trying to send something: {err}")
+                                            // @todo we consume the queue as much as possible
+                                            // this should be handled differently?
+                                            while outbound_msg_rx2.len() > 0 {
+                                                let _ = outbound_msg_rx2.recv().await;
+                                            }
+                                            println!("Got a lagging error: {err}");
                                         },
                                     };
                                 },
+                                _ = close_trigger_receiver.recv() => {
+                                    println!("Received closing trigger");
+                                    consume = false;
+                                }
                             }
                         }
                         println!("Stopped further consumption of the data channel");
@@ -273,31 +282,37 @@ impl SteckerWebRTCConnection {
                 Box::pin(async {})
             }));
 
+            let close_trigger3 = close_trigger2.clone();
             d2.on_close(Box::new(move || {
-                let _ = close_trigger2.send(());
+                println!("Close data channel");
+                let _ = close_trigger3.clone().send(());
                 Box::pin(async {})
             }));
 
+            let close_trigger3 = close_trigger2.clone();
+
             Box::pin(async move {
                 let d3 = d2.clone();
-                let mut result = anyhow::Result::<usize>::Ok(0);
+                let mut _result = anyhow::Result::<usize>::Ok(0);
+                let mut consume = true;
 
                 let mut receiver = outbound_msg_tx2.subscribe();
-
-                while result.is_ok() {
+                let mut close_trigger_receiver = close_trigger3.clone().subscribe();
+                while consume {
                     tokio::select! {
                         msg_to_send = receiver.recv() => {
                             match msg_to_send {
                                 Ok(m) => {
-                                    // normally this gets mapped to result via `.map_err(Into::into)`
-                                    // but then our forwarding fails
-                                    // so we simply ignore its return value for now
-                                    let _ = d3.send_stecker_data(m).await;
+                                    _result = d3.send_stecker_data(m).await.map_err(Into::into)
                                 },
                                 Err(e) => {
                                     println!("Failed to send message to data channel: {e}");
                                 },
                             }
+                        },
+                        _ = close_trigger_receiver.recv() => {
+                            println!("Received stop signal");
+                            consume = false;
                         }
                     }
                 }

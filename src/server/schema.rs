@@ -121,13 +121,29 @@ impl Mutation {
         tokio::spawn(async move {
             // let mut client_receiver = broadcast.subscribe();
             let mut room_receiver = room_rx.subscribe();
-            loop {
-                while let Ok(msg) = room_receiver.recv().await {
-                    // println!("Received a message to be distributed: {msg}");
-                    if let Err(err) = stecker_data_channel.outbound.send(msg) {
-                        println!("Failed forwarding message from target channel to room: {err}");
+            let mut stop_receiver = stecker_data_channel.close_trigger.subscribe();
+            let mut consume = true;
+
+            while consume {
+                tokio::select! {
+                    raw_msg = room_receiver.recv() => {
+                        match raw_msg {
+                            Ok(msg) => {
+                                let _ = stecker_data_channel.outbound.send(msg);
+                            },
+                            Err(err) => {
+                                while room_receiver.len() > 0 {
+                                    let _ = room_receiver.recv().await;
+                                }
+                                println!("Got some lagging problems: {err}");
+                            },
+                        }
+                    },
+                    _ = stop_receiver.recv() => {
+                        println!("Received a stop signal");
+                        consume = false;
                     }
-                }
+                };
             }
         });
 
