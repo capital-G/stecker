@@ -76,7 +76,7 @@ impl Mutation {
         let connection = SteckerWebRTCConnection::build_connection().await?;
         let response_offer = connection.respond_to_offer(offer).await?;
 
-        let stecker_data_channel = connection.listen_for_data_channel().await;
+        let stecker_data_channel = connection.listen_for_data_channel::<f32>().await;
 
         let room = BroadcastRoom {
             name: name.clone(),
@@ -110,7 +110,7 @@ impl Mutation {
 
         let connection = SteckerWebRTCConnection::build_connection().await?;
         let response_offer = connection.respond_to_offer(offer).await?;
-        let stecker_data_channel = connection.listen_for_data_channel().await;
+        let stecker_data_channel = connection.listen_for_data_channel::<f32>().await;
 
         let room = room.unwrap().lock().await;
 
@@ -121,22 +121,25 @@ impl Mutation {
         tokio::spawn(async move {
             // let mut client_receiver = broadcast.subscribe();
             let mut room_receiver = room_rx.subscribe();
-
-            while let Ok(msg) = room_receiver.recv().await {
-                println!("Received a message to be distributed: {msg}");
-                if let Err(err) = stecker_data_channel.outbound.send(msg) {
-                    println!("Failed forwarding message from target channel to room (?): {err}");
+            loop {
+                while let Ok(msg) = room_receiver.recv().await {
+                    // println!("Received a message to be distributed: {msg}");
+                    if let Err(err) = stecker_data_channel.outbound.send(msg) {
+                        println!("Failed forwarding message from target channel to room: {err}");
+                    }
                 }
             }
         });
 
         // Listen to room messages and pass them to client
         tokio::spawn(async move {
-            while let Ok(msg) = stecker_data_channel.inbound.subscribe().recv().await {
-                println!("Broadcasting message from subscriber - will be ignored: {msg}");
-                // if let Err(err) = room.send(msg) {
-                //     println!("Failed forwarding message from room to target channel {err}");
-                // }
+            loop {
+                while let Ok(msg) = stecker_data_channel.inbound.subscribe().recv().await {
+                    println!("Broadcasting message from subscriber - will be ignored: {msg}");
+                    // if let Err(err) = room.send(msg) {
+                    //     println!("Failed forwarding message from room to target channel {err}");
+                    // }
+                }
             }
         });
 

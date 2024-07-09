@@ -7,19 +7,30 @@
 
 namespace SuperStecker {
 
-class SuperStecker : public SCUnit {
+class SuperSteckerIn : public SCUnit {
 public:
-    SuperStecker();
+    SuperSteckerIn();
 
-    // Destructor
-    // ~{{ SuperStecker.plugin_name }}();
+    // ~SuperSteckerIn();
 
 private:
-    // Calc function
     void next_k(int nSamples);
     rust::Str extractRoomName();
 
-    // Member variables
+    char* m_roomName;
+    std::unique_ptr<rust::Box<Room>> m_room;
+};
+
+class SuperSteckerOut : public SCUnit {
+public:
+    SuperSteckerOut();
+
+    // ~SuperSteckerOut();
+
+private:
+    void next_k(int nSamples);
+    rust::Str extractRoomName();
+
     char* m_roomName;
     std::unique_ptr<rust::Box<Room>> m_room;
 };

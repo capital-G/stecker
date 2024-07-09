@@ -170,7 +170,7 @@ impl SteckerWebRTCConnection {
     pub async fn listen_for_data_channel<T>(&self) -> SteckerDataChannel<T>
     where
         RTCDataChannel: DataSender<T>,
-        T: 'static + Send + Sync + Clone,
+        T: 'static + Send + Sync + Clone + std::fmt::Debug,
     {
         // messages received from data channel are inbound,
         // messages send to data channel are outbound
@@ -218,11 +218,19 @@ impl SteckerWebRTCConnection {
 
                         while result.is_ok() {
                             tokio::select! {
-                                Ok(msg_to_send) = outbound_msg_rx2.recv() => {
-                                    result = d2.send_stecker_data(msg_to_send).await.map_err(Into::into);
+                                msg_to_send = outbound_msg_rx2.recv() => {
+                                    match msg_to_send {
+                                        Ok(msg) => {
+                                            result = d2.send_stecker_data(msg).await.map_err(Into::into);
+                                        },
+                                        Err(err) => {
+                                            println!("Error when trying to send something: {err}")
+                                        },
+                                    };
                                 },
                             }
                         }
+                        println!("Stopped further consumption of the data channel");
                     });
                 })
             }));
@@ -242,8 +250,8 @@ impl SteckerWebRTCConnection {
     {
         // messages received from data channel are inbound,
         // messages send to data channel are outbound
-        let (inbound_msg_tx, _) = broadcast::channel::<T>(2);
-        let (outbound_msg_tx, _) = broadcast::channel::<T>(2);
+        let (inbound_msg_tx, _) = broadcast::channel::<T>(1024);
+        let (outbound_msg_tx, _) = broadcast::channel::<T>(1024);
 
         let inbound_msg_tx2 = inbound_msg_tx.clone();
         let outbound_msg_tx2 = outbound_msg_tx.clone();
@@ -281,16 +289,19 @@ impl SteckerWebRTCConnection {
                         msg_to_send = receiver.recv() => {
                             match msg_to_send {
                                 Ok(m) => {
-                                    result = d3.send_stecker_data(m).await.map_err(Into::into);
+                                    // normally this gets mapped to result via `.map_err(Into::into)`
+                                    // but then our forwarding fails
+                                    // so we simply ignore its return value for now
+                                    let _ = d3.send_stecker_data(m).await;
                                 },
                                 Err(e) => {
                                     println!("Failed to send message to data channel: {e}");
                                 },
                             }
-
                         }
                     }
                 }
+                println!("Stopped consuming messages");
             })
         }));
 
