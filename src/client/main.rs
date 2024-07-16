@@ -3,9 +3,8 @@ use std::time::Duration;
 use clap::{Parser, Subcommand};
 use shared::api::APIClient;
 use shared::connections::SteckerWebRTCConnection;
-use webrtc::peer_connection::math_rand_alpha;
 
-const HOST: &str = "http://127.0.0.1:8000";
+const LOCAL_HOST: &str = "http://127.0.0.1:8000";
 
 #[derive(Parser)]
 #[command(version, about, long_about = None)]
@@ -20,11 +19,19 @@ enum Commands {
     CreateRoom {
         /// name of the new room
         name: String,
+
+        /// address of the stecker server
+        #[arg(long, default_value_t=LOCAL_HOST.to_string())]
+        host: String,
     },
     /// join an existing broadcast room
     JoinRoom {
         /// name of the room to join
         name: String,
+
+        /// address of the stecker server
+        #[arg(long, default_value_t=LOCAL_HOST.to_string())]
+        host: String,
     },
 }
 
@@ -33,17 +40,17 @@ async fn main() {
     let cli = Cli::parse();
 
     match &cli.command {
-        Some(Commands::CreateRoom { name }) => {
-            let _ = create_room(name).await;
+        Some(Commands::CreateRoom { name, host }) => {
+            let _ = create_room(name, host).await;
         }
-        Some(Commands::JoinRoom { name }) => {
-            let _ = join_room(name).await;
+        Some(Commands::JoinRoom { name, host }) => {
+            let _ = join_room(name, host).await;
         }
         None => {}
     }
 }
 
-async fn create_room(name: &str) -> anyhow::Result<()> {
+async fn create_room(name: &str, host: &str) -> anyhow::Result<()> {
     let connection = SteckerWebRTCConnection::build_connection().await?;
     let stecker_data_channel = connection.create_data_channel("foo").await?;
     let offer = connection.create_offer().await?;
@@ -63,7 +70,7 @@ async fn create_room(name: &str) -> anyhow::Result<()> {
     });
 
     let api_client = APIClient {
-        host: HOST.to_string(),
+        host: host.to_string(),
     };
 
     match api_client.create_room(name, &offer).await {
@@ -86,13 +93,13 @@ async fn create_room(name: &str) -> anyhow::Result<()> {
     }
 }
 
-async fn join_room(name: &str) -> anyhow::Result<()> {
+async fn join_room(name: &str, host: &str) -> anyhow::Result<()> {
     let connection = SteckerWebRTCConnection::build_connection().await?;
     let stecker_data_channel = connection.create_data_channel::<f32>("foo").await?;
     let offer = connection.create_offer().await?;
 
     let api_client = APIClient {
-        host: HOST.to_string(),
+        host: host.to_string(),
     };
 
     match api_client.join_room(name, &offer).await {
