@@ -1,4 +1,4 @@
-use crate::broadcast_room::BroadcastRoom;
+use crate::broadcast_room::{BroadcastRoom, RoomType};
 use shared::connections::SteckerWebRTCConnection;
 
 use std::{collections::HashMap, sync::Arc};
@@ -16,11 +16,12 @@ struct Room {
     uuid: String,
     name: String,
     num_listeners: usize,
+    room_type: RoomType,
 }
 
 #[Object]
 impl Query {
-    async fn rooms<'a>(&self, ctx: &Context<'a>) -> Result<Vec<Room>> {
+    async fn rooms<'a>(&self, ctx: &Context<'a>, room_type: Option<RoomType>) -> Result<Vec<Room>> {
         let state = ctx.data_unchecked::<AppState>();
         let rooms = state.rooms.lock().await;
 
@@ -29,11 +30,26 @@ impl Query {
         let mut results = Vec::with_capacity(rooms.len());
         for (name, room) in rooms.iter() {
             let locked_room = room.lock().await;
-            results.push(Room {
-                uuid: locked_room.uuid.clone().into(),
-                name: name.clone(),
-                num_listeners: 0,
-            });
+            match room_type {
+                Some(rt) => {
+                    if locked_room.room_type == rt {
+                        results.push(Room {
+                            uuid: locked_room.uuid.clone().into(),
+                            name: name.clone(),
+                            num_listeners: 0,
+                            room_type: rt,
+                        });
+                    }
+                }
+                None => {
+                    results.push(Room {
+                        uuid: locked_room.uuid.clone().into(),
+                        name: name.clone(),
+                        num_listeners: 0,
+                        room_type: RoomType::Float,
+                    });
+                }
+            }
         }
         Ok(results)
     }
@@ -77,6 +93,7 @@ impl Mutation {
             reply: stecker_data_channel.outbound.clone(),
             broadcast: stecker_data_channel.inbound,
             uuid: Uuid::new_v4(),
+            room_type: RoomType::Float,
         };
 
         {
