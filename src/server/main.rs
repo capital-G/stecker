@@ -18,14 +18,12 @@ use tokio::{net::TcpListener, sync::Mutex};
 use tower_http::services::ServeDir;
 
 struct AppState {
-    pub counter: Mutex<i32>,
     pub rooms: Mutex<HashMap<String, Arc<Mutex<BroadcastRoom>>>>,
 }
 
 impl AppState {
     pub fn new() -> Self {
         Self {
-            counter: Mutex::new(0),
             rooms: Mutex::new(HashMap::new()),
         }
     }

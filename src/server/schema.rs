@@ -20,12 +20,6 @@ struct Room {
 
 #[Object]
 impl Query {
-    async fn counter<'a>(&self, ctx: &Context<'a>) -> i32 {
-        let mut counter = ctx.data_unchecked::<AppState>().counter.lock().await;
-        *counter += 1;
-        *counter
-    }
-
     async fn rooms<'a>(&self, ctx: &Context<'a>) -> Result<Vec<Room>> {
         let state = ctx.data_unchecked::<AppState>();
         let rooms = state.rooms.lock().await;
@@ -49,12 +43,6 @@ pub struct Mutation;
 
 #[Object]
 impl Mutation {
-    async fn counter_offset<'a>(&self, ctx: &Context<'a>, offset: i32) -> i32 {
-        let mut foo = ctx.data_unchecked::<AppState>().counter.lock().await;
-        *foo += offset;
-        *foo
-    }
-
     async fn reset_rooms<'a>(&self, ctx: &Context<'a>) -> f32 {
         let mut rooms = ctx.data_unchecked::<AppState>().rooms.lock().await;
         *rooms = HashMap::new();
