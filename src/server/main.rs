@@ -1,9 +1,7 @@
-pub mod broadcast_room;
+pub mod models;
 pub mod schema;
+pub mod state;
 
-use std::{collections::HashMap, sync::Arc};
-
-use crate::broadcast_room::BroadcastRoom;
 use crate::schema::{Mutation, Query};
 
 use async_graphql::{http::GraphiQLSource, EmptySubscription, Schema};
@@ -13,21 +11,9 @@ use axum::{
     routing::get,
     Router,
 };
-// use models::BroadcastRoom;
-use tokio::{net::TcpListener, sync::Mutex};
+use state::AppState;
+use tokio::net::TcpListener;
 use tower_http::services::ServeDir;
-
-struct AppState {
-    pub rooms: Mutex<HashMap<String, Arc<Mutex<BroadcastRoom>>>>,
-}
-
-impl AppState {
-    pub fn new() -> Self {
-        Self {
-            rooms: Mutex::new(HashMap::new()),
-        }
-    }
-}
 
 async fn graphiql() -> impl IntoResponse {
     response::Html(GraphiQLSource::build().endpoint("/").finish())

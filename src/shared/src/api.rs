@@ -1,4 +1,4 @@
-use crate::utils::decode_b64;
+use crate::{models::RoomType, utils::decode_b64};
 use anyhow::bail;
 use reqwest::StatusCode;
 use serde::Deserialize;
@@ -26,17 +26,34 @@ pub struct APIClient {
     pub host: String,
 }
 
+// @todo make this static?
+impl Into<String> for &RoomType {
+    fn into(self) -> String {
+        match self {
+            RoomType::Float => "FLOAT".to_string(),
+            RoomType::Chat => "CHAT".to_string(),
+            // do not create meta channels directly?!
+            // @todo should be avoided by having an subset
+            // of the enum which is exposed
+            RoomType::Meta => !unimplemented!(),
+        }
+    }
+}
+
 impl APIClient {
     pub async fn create_room(
         &self,
         name: &str,
+        room_type: &RoomType,
         local_session_description: &str,
     ) -> anyhow::Result<RTCSessionDescription> {
+        let room_string: String = room_type.into();
         let query = json!({
-            "query": "mutation createRoom($name:String!, $offer:String!) { createRoom(name:$name, offer:$offer) }",
+            "query": "mutation createRoom($name:String!, $offer:String!, $roomType: RoomType!) { createRoom(name:$name, offer:$offer, roomType:$roomType) }",
             "variables": {
                 "name": name,
                 "offer": local_session_description,
+                "roomType": room_string,
             }
         });
 
@@ -65,13 +82,16 @@ impl APIClient {
     pub async fn join_room(
         &self,
         name: &str,
+        room_type: &RoomType,
         local_session_description: &str,
     ) -> anyhow::Result<RTCSessionDescription> {
+        let room_string: String = room_type.into();
         let query = json!({
-            "query": "mutation joinRoom($name:String!, $offer:String!) { joinRoom(name:$name, offer:$offer) }",
+            "query": "mutation joinRoom($name:String!, $offer:String!, $roomType:RoomType!) { joinRoom(name:$name, offer:$offer, roomType:$roomType) }",
             "variables": {
                 "name": name,
                 "offer": local_session_description,
+                "roomType": room_string,
             }
         });
 

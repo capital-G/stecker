@@ -1,9 +1,8 @@
+use crate::models::{RoomType, SteckerDataChannel, SteckerSendable};
 use crate::utils::{decode_b64, encode_offer};
 
-use bytes::{Buf, BufMut, BytesMut};
 use std::sync::Arc;
 use tokio::sync::broadcast;
-use tokio::sync::broadcast::Sender;
 use tokio::sync::Mutex;
 use webrtc::api::interceptor_registry::register_default_interceptors;
 use webrtc::api::media_engine::MediaEngine;
@@ -15,43 +14,6 @@ use webrtc::interceptor::registry::Registry;
 use webrtc::peer_connection::configuration::RTCConfiguration;
 use webrtc::peer_connection::sdp::session_description::RTCSessionDescription;
 use webrtc::peer_connection::RTCPeerConnection;
-
-pub trait DataSender<T> {
-    fn send_stecker_data(
-        &self,
-        data: T,
-    ) -> impl std::future::Future<Output = Result<usize, webrtc::Error>> + Send;
-    fn convert_stecker_data(&self, message: DataChannelMessage) -> anyhow::Result<T>;
-}
-pub struct SteckerDataChannel<T> {
-    pub inbound: Sender<T>,
-    pub outbound: Sender<T>,
-    pub close_trigger: Sender<()>,
-}
-
-impl DataSender<String> for RTCDataChannel {
-    async fn send_stecker_data(&self, data: String) -> Result<usize, webrtc::Error> {
-        self.send_text(data).await
-    }
-
-    fn convert_stecker_data(&self, message: DataChannelMessage) -> anyhow::Result<String> {
-        Ok(String::from_utf8(message.data.to_vec())?)
-    }
-}
-
-impl DataSender<f32> for RTCDataChannel {
-    async fn send_stecker_data(&self, data: f32) -> Result<usize, webrtc::Error> {
-        let mut b = BytesMut::with_capacity(4);
-        b.put_f32(data);
-        let b2 = b.freeze();
-        self.send(&b2).await
-    }
-
-    fn convert_stecker_data(&self, message: DataChannelMessage) -> anyhow::Result<f32> {
-        let mut data = message.data.clone();
-        Ok(data.get_f32())
-    }
-}
 
 pub struct SteckerWebRTCConnection {
     // FIXME: potentially both fields are obsolete
@@ -167,11 +129,10 @@ impl SteckerWebRTCConnection {
     }
 
     // other party builds data channel and we listen for it
-    pub async fn listen_for_data_channel<T>(&self) -> SteckerDataChannel<T>
-    where
-        RTCDataChannel: DataSender<T>,
-        T: 'static + Send + Sync + Clone + std::fmt::Debug,
-    {
+    pub async fn listen_for_data_channel<T: SteckerSendable<T = T>>(
+        &self,
+        room_type: &RoomType,
+    ) -> SteckerDataChannel<T> {
         // messages received from data channel are inbound,
         // messages send to data channel are outbound
         let (inbound_msg_tx, _) = broadcast::channel::<T>(1024);
@@ -183,9 +144,20 @@ impl SteckerWebRTCConnection {
         let (close_trigger, _) = broadcast::channel::<()>(1);
         let close_trigger2 = close_trigger.clone();
 
+        let room_type2 = room_type.clone();
+
         self.peer_connection
             .on_data_channel(Box::new(move |d: Arc<RTCDataChannel>| {
                 let close_trigger3 = close_trigger2.clone();
+
+                let label = d.label();
+                let default_label = room_type2.get_default_label();
+                if label != default_label {
+                    println!("Ignore data channel because of mismatch in label: Is '{label}', should be '{default_label}'");
+                    return Box::pin(async {})
+                } else {
+                    println!("Matched data channel {label}")
+                }
 
                 d.on_close(Box::new(move || {
                     println!("Data channel closed");
@@ -203,7 +175,8 @@ impl SteckerWebRTCConnection {
                 let d2 = d.clone();
 
                 d.on_message(Box::new(move |message: DataChannelMessage| {
-                    let msg = d2.convert_stecker_data(message).unwrap();
+                    let msg = T::from_stecker_data::<T>(&message).unwrap();
+                    // let msg = d2.convert_stecker_data(message).unwrap();
                     let _ = inbound_msg_tx3.send(msg);
                     Box::pin(async {})
                 }));
@@ -221,7 +194,7 @@ impl SteckerWebRTCConnection {
                                 msg_to_send = outbound_msg_rx2.recv() => {
                                     match msg_to_send {
                                         Ok(msg) => {
-                                            _result = d2.send_stecker_data(msg).await.map_err(Into::into);
+                                            let _ = d2.send(&msg.to_stecker_data().unwrap()).await;
                                         },
                                         Err(err) => {
                                             // @todo we consume the queue as much as possible
@@ -252,11 +225,10 @@ impl SteckerWebRTCConnection {
     }
 
     // we build data channel, other party has to listen
-    pub async fn create_data_channel<T>(&self, name: &str) -> anyhow::Result<SteckerDataChannel<T>>
-    where
-        RTCDataChannel: DataSender<T>,
-        T: 'static + Send + Sync + Clone,
-    {
+    pub async fn create_data_channel<T: SteckerSendable<T = T>>(
+        &self,
+        name: &str,
+    ) -> anyhow::Result<SteckerDataChannel<T>> {
         // messages received from data channel are inbound,
         // messages send to data channel are outbound
         let (inbound_msg_tx, _) = broadcast::channel::<T>(1024);
@@ -277,8 +249,7 @@ impl SteckerWebRTCConnection {
             let d2 = d.clone();
             let d3 = d.clone();
             d2.on_message(Box::new(move |message: DataChannelMessage| {
-                let msg = d3.convert_stecker_data(message).unwrap();
-                let _ = inbound_msg_tx2.send(msg);
+                let _ = inbound_msg_tx2.send(T::from_stecker_data::<T>(&message).unwrap());
                 Box::pin(async {})
             }));
 
@@ -303,7 +274,7 @@ impl SteckerWebRTCConnection {
                         msg_to_send = receiver.recv() => {
                             match msg_to_send {
                                 Ok(m) => {
-                                    _result = d3.send_stecker_data(m).await.map_err(Into::into)
+                                    _result = d3.send(&m.to_stecker_data().unwrap()).await.map_err(Into::into)
                                 },
                                 Err(e) => {
                                     println!("Failed to send message to data channel: {e}");
