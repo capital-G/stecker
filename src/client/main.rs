@@ -6,7 +6,7 @@ use clap::{Parser, Subcommand};
 use models::ClientRoomType;
 use shared::api::APIClient;
 use shared::connections::SteckerWebRTCConnection;
-use shared::models::{RoomType, SteckerSendable};
+use shared::models::{ChannelName, PublicRoomType, RoomType, SteckerSendable};
 
 const LOCAL_HOST: &str = "http://127.0.0.1:8000";
 
@@ -59,13 +59,13 @@ async fn main() {
         }) => {
             let _ = match room_type {
                 ClientRoomType::Float => {
-                    create_room::<f32>(name, host, &RoomType::Float, 42.0).await
+                    create_room::<f32>(name, host, room_type.clone(), 42.0).await
                 }
                 ClientRoomType::Chat => {
                     create_room::<String>(
                         name,
                         host,
-                        &RoomType::Chat,
+                        room_type.clone(),
                         "some chat message".to_string(),
                     )
                     .await
@@ -78,8 +78,12 @@ async fn main() {
             host,
         }) => {
             let _ = match room_type {
-                ClientRoomType::Chat => join_room::<String>(name, host, &RoomType::Chat).await,
-                ClientRoomType::Float => join_room::<f32>(name, host, &RoomType::Float).await,
+                ClientRoomType::Chat => {
+                    let _ = join_room::<String>(name, host, room_type.clone());
+                }
+                ClientRoomType::Float => {
+                    let _ = join_room::<f32>(name, host, room_type.clone());
+                }
             };
         }
         None => {}
@@ -89,12 +93,16 @@ async fn main() {
 async fn create_room<T: SteckerSendable<T = T>>(
     name: &str,
     host: &str,
-    room_type: &RoomType,
+    client_room_type: ClientRoomType,
     value: T,
 ) -> anyhow::Result<()> {
     let connection = SteckerWebRTCConnection::build_connection().await?;
+
+    let public_room_type: PublicRoomType = client_room_type.clone().into();
+    let default_channel_name = ChannelName::from(RoomType::from(public_room_type.into()));
+
     let stecker_data_channel = connection
-        .create_data_channel::<T>(room_type.get_default_label())
+        .create_data_channel::<T>(&default_channel_name)
         .await?;
 
     let offer = connection.create_offer().await?;
@@ -103,7 +111,10 @@ async fn create_room<T: SteckerSendable<T = T>>(
         host: host.to_string(),
     };
 
-    match api_client.create_room(name, room_type, &offer).await {
+    match api_client
+        .create_room(name, &client_room_type.into(), &offer)
+        .await
+    {
         Ok(answer) => {
             // Apply the answer as the remote description
             connection.set_remote_description(answer).await?;
@@ -137,11 +148,15 @@ async fn create_room<T: SteckerSendable<T = T>>(
 async fn join_room<T: SteckerSendable<T = T>>(
     name: &str,
     host: &str,
-    room_type: &RoomType,
+    client_room_type: ClientRoomType,
 ) -> anyhow::Result<()> {
     let connection = SteckerWebRTCConnection::build_connection().await?;
+
+    let public_room_type: PublicRoomType = client_room_type.into();
+    let default_channel_name = ChannelName::from(RoomType::from(public_room_type.clone().into()));
+
     let stecker_data_channel = connection
-        .create_data_channel::<T>(room_type.get_default_label())
+        .create_data_channel::<T>(&default_channel_name)
         .await?;
     let offer = connection.create_offer().await?;
 
@@ -149,7 +164,7 @@ async fn join_room<T: SteckerSendable<T = T>>(
         host: host.to_string(),
     };
 
-    match api_client.join_room(name, room_type, &offer).await {
+    match api_client.join_room(name, &public_room_type, &offer).await {
         Ok(answer) => {
             // Apply the answer as the remote description
             connection.set_remote_description(answer).await?;

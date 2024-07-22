@@ -13,6 +13,7 @@ pub enum RoomType {
 }
 
 // users can not create a meta channel
+#[derive(Copy, Clone)]
 pub enum PublicRoomType {
     Float,
     Chat,
@@ -119,5 +120,17 @@ impl SteckerSendable for SteckerData {
         Err(anyhow!(
             "Cannot deserialize SteckerData without knowing the type"
         ))
+    }
+}
+
+pub type ChannelName = String;
+
+impl From<RoomType> for ChannelName {
+    fn from(value: RoomType) -> Self {
+        match value {
+            RoomType::Float => "float".to_string(),
+            RoomType::Chat => "chat".to_string(),
+            RoomType::Meta => "meta".to_string(),
+        }
     }
 }

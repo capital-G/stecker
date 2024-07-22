@@ -1,4 +1,7 @@
-use crate::{models::RoomType, utils::decode_b64};
+use crate::{
+    models::{PublicRoomType, RoomType},
+    utils::decode_b64,
+};
 use anyhow::bail;
 use reqwest::StatusCode;
 use serde::Deserialize;
@@ -27,15 +30,11 @@ pub struct APIClient {
 }
 
 // @todo make this static?
-impl Into<String> for &RoomType {
+impl Into<String> for &PublicRoomType {
     fn into(self) -> String {
         match self {
-            RoomType::Float => "FLOAT".to_string(),
-            RoomType::Chat => "CHAT".to_string(),
-            // do not create meta channels directly?!
-            // @todo should be avoided by having an subset
-            // of the enum which is exposed
-            RoomType::Meta => !unimplemented!(),
+            PublicRoomType::Float => "FLOAT".to_string(),
+            PublicRoomType::Chat => "CHAT".to_string(),
         }
     }
 }
@@ -44,7 +43,7 @@ impl APIClient {
     pub async fn create_room(
         &self,
         name: &str,
-        room_type: &RoomType,
+        room_type: &PublicRoomType,
         local_session_description: &str,
     ) -> anyhow::Result<RTCSessionDescription> {
         let room_string: String = room_type.into();
@@ -82,7 +81,7 @@ impl APIClient {
     pub async fn join_room(
         &self,
         name: &str,
-        room_type: &RoomType,
+        room_type: &PublicRoomType,
         local_session_description: &str,
     ) -> anyhow::Result<RTCSessionDescription> {
         let room_string: String = room_type.into();

@@ -1,4 +1,4 @@
-use crate::models::{RoomType, SteckerDataChannel, SteckerSendable};
+use crate::models::{ChannelName, RoomType, SteckerDataChannel, SteckerSendable};
 use crate::utils::{decode_b64, encode_offer};
 
 use std::sync::Arc;
@@ -151,7 +151,7 @@ impl SteckerWebRTCConnection {
                 let close_trigger3 = close_trigger2.clone();
 
                 let label = d.label();
-                let default_label = room_type2.get_default_label();
+                let default_label = ChannelName::from(room_type2);
                 if label != default_label {
                     println!("Ignore data channel because of mismatch in label: Is '{label}', should be '{default_label}'");
                     return Box::pin(async {})
@@ -227,7 +227,7 @@ impl SteckerWebRTCConnection {
     // we build data channel, other party has to listen
     pub async fn create_data_channel<T: SteckerSendable<T = T>>(
         &self,
-        name: &str,
+        name: &ChannelName,
     ) -> anyhow::Result<SteckerDataChannel<T>> {
         // messages received from data channel are inbound,
         // messages send to data channel are outbound
