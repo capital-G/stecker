@@ -5,7 +5,11 @@ use tokio;
 use tokio::runtime::Runtime;
 use tokio::sync::broadcast;
 
-use shared::{api::APIClient, connections::SteckerWebRTCConnection};
+use shared::{
+    api::APIClient,
+    connections::SteckerWebRTCConnection,
+    models::{ChannelName, RoomType},
+};
 
 pub struct Room {
     name: String,
@@ -16,8 +20,6 @@ pub struct Room {
     // from the queue
     last_value: f32,
 }
-
-const DATA_CHANNEL_NAME: &str = "foo";
 
 impl Room {
     pub fn join_room(name: &str, host: &str) -> Self {
@@ -34,14 +36,14 @@ impl Room {
             let rt = Runtime::new().unwrap();
             rt.block_on(async {
                 let connection = SteckerWebRTCConnection::build_connection().await.unwrap();
-                let stecker_data_channel = connection.create_data_channel::<f32>(DATA_CHANNEL_NAME).await.unwrap();
+                let stecker_data_channel = connection.create_data_channel::<f32>(&ChannelName::from(RoomType::Float)).await.unwrap();
                 let offer = connection.create_offer().await.unwrap();
 
                 let api_client = APIClient {
                     host: host2,
                 };
 
-                match api_client.join_room(&name2, &offer).await {
+                match api_client.join_room(&name2, &shared::models::PublicRoomType::Float, &offer).await {
                     Ok(answer) => {
                         connection.set_remote_description(answer).await.unwrap();
 
@@ -112,7 +114,7 @@ impl Room {
             rt.block_on(async {
                 let connection = SteckerWebRTCConnection::build_connection().await?;
                 let stecker_data_channel = connection
-                    .create_data_channel::<f32>(DATA_CHANNEL_NAME)
+                    .create_data_channel::<f32>(&ChannelName::from(RoomType::Float))
                     .await?;
                 let offer = connection.create_offer().await?;
 
@@ -144,7 +146,7 @@ impl Room {
 
                 let api_client = APIClient { host: host2 };
 
-                match api_client.create_room(&name2, &offer).await {
+                match api_client.create_room(&name2, &shared::models::PublicRoomType::Float, &offer).await {
                     Ok(answer) => {
                         connection.set_remote_description(answer).await?;
 
