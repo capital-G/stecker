@@ -129,7 +129,7 @@ impl SteckerWebRTCConnection {
     }
 
     // other party builds data channel and we listen for it
-    pub async fn listen_for_data_channel<T: SteckerSendable<T = T>>(
+    pub async fn listen_for_data_channel<T: SteckerSendable>(
         &self,
         room_type: &RoomType,
     ) -> SteckerDataChannel<T> {
@@ -175,7 +175,7 @@ impl SteckerWebRTCConnection {
                 let d2 = d.clone();
 
                 d.on_message(Box::new(move |message: DataChannelMessage| {
-                    let msg = T::from_stecker_data::<T>(&message).unwrap();
+                    let msg = T::from_stecker_data(&message).unwrap();
                     // let msg = d2.convert_stecker_data(message).unwrap();
                     let _ = inbound_msg_tx3.send(msg);
                     Box::pin(async {})
@@ -225,7 +225,7 @@ impl SteckerWebRTCConnection {
     }
 
     // we build data channel, other party has to listen
-    pub async fn create_data_channel<T: SteckerSendable<T = T>>(
+    pub async fn create_data_channel<T: SteckerSendable>(
         &self,
         name: &str,
     ) -> anyhow::Result<SteckerDataChannel<T>> {
@@ -249,7 +249,7 @@ impl SteckerWebRTCConnection {
             let d2 = d.clone();
             let d3 = d.clone();
             d2.on_message(Box::new(move |message: DataChannelMessage| {
-                let _ = inbound_msg_tx2.send(T::from_stecker_data::<T>(&message).unwrap());
+                let _ = inbound_msg_tx2.send(T::from_stecker_data(&message).unwrap());
                 Box::pin(async {})
             }));
 

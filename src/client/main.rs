@@ -86,7 +86,7 @@ async fn main() {
     }
 }
 
-async fn create_room<T: SteckerSendable<T = T>>(
+async fn create_room<T: SteckerSendable>(
     name: &str,
     host: &str,
     room_type: &RoomType,
@@ -134,7 +134,7 @@ async fn create_room<T: SteckerSendable<T = T>>(
     }
 }
 
-async fn join_room<T: SteckerSendable<T = T>>(
+async fn join_room<T: SteckerSendable>(
     name: &str,
     host: &str,
     room_type: &RoomType,

@@ -48,12 +48,11 @@ impl RoomType {
 }
 
 pub trait SteckerSendable: Clone + Sync + 'static + Send + Display {
-    type T: Display;
     // @todo can we return a reference here? would avoid much copying
     // and in a former implementation, where we attached it to the data
     // channel we could simply send out the reference
     fn to_stecker_data(&self) -> anyhow::Result<Bytes>;
-    fn from_stecker_data<T>(data: &DataChannelMessage) -> anyhow::Result<Self::T>;
+    fn from_stecker_data(data: &DataChannelMessage) -> anyhow::Result<Self>;
 }
 
 pub struct SteckerDataChannel<T: SteckerSendable> {
@@ -69,27 +68,24 @@ pub enum SteckerData {
 }
 
 impl SteckerSendable for f32 {
-    type T = f32;
     fn to_stecker_data(&self) -> anyhow::Result<Bytes> {
         let mut b = BytesMut::with_capacity(4);
         b.put_f32(*self);
         Ok(b.freeze())
     }
 
-    fn from_stecker_data<T>(data: &DataChannelMessage) -> anyhow::Result<Self::T> {
+    fn from_stecker_data(data: &DataChannelMessage) -> anyhow::Result<Self> {
         let mut b = data.data.clone();
         Ok(Bytes::get_f32(&mut b))
     }
 }
 
 impl SteckerSendable for String {
-    type T = String;
-
     fn to_stecker_data(&self) -> anyhow::Result<Bytes> {
         Ok(self.clone().into())
     }
 
-    fn from_stecker_data<T>(data: &DataChannelMessage) -> anyhow::Result<Self::T> {
+    fn from_stecker_data(data: &DataChannelMessage) -> anyhow::Result<Self> {
         Ok(String::from_utf8(data.data.to_vec())?)
     }
 }
@@ -104,7 +100,6 @@ impl Display for SteckerData {
 }
 
 impl SteckerSendable for SteckerData {
-    type T = Self;
     fn to_stecker_data(&self) -> anyhow::Result<Bytes> {
         match self {
             SteckerData::F32(float_sendable) => float_sendable.to_stecker_data(),
@@ -112,7 +107,7 @@ impl SteckerSendable for SteckerData {
         }
     }
 
-    fn from_stecker_data<T>(_data: &DataChannelMessage) -> anyhow::Result<Self> {
+    fn from_stecker_data(_data: &DataChannelMessage) -> anyhow::Result<Self> {
         // what to do here?
         // i think we can't dispatch here - instead we fail?!
         // maybe this needs a better interface
