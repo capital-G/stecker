@@ -1,7 +1,4 @@
-use crate::{
-    models::{BroadcastRoom, Room, RoomType},
-    state::RoomMapTrait,
-};
+use crate::models::{BroadcastRoom, Room, RoomType};
 use shared::models::RoomType as SharedRoomType;
 
 use std::sync::Arc;
@@ -18,8 +15,8 @@ impl Query {
         let state = ctx.data_unchecked::<AppState>();
 
         match room_type {
-            RoomType::Float => state.float_rooms.get_rooms().await,
-            RoomType::Chat => state.chat_rooms.get_rooms().await,
+            RoomType::Float => state.float_rooms.values().await,
+            RoomType::Chat => state.chat_rooms.values().await,
         }
     }
 }
@@ -54,9 +51,8 @@ impl Mutation {
                 let result =
                     BroadcastRoom::<f32>::create_room(name, offer, room_type.into()).await?;
                 {
-                    let mut room_lock = state.float_rooms.map.lock().await;
                     let room_mutex = Arc::new(AsyncMutex::new(result.broadcast_room));
-                    room_lock.insert(name2, room_mutex.clone());
+                    state.float_rooms.insert(&name2, room_mutex.clone()).await;
                 }
                 Ok(result.offer)
             }
@@ -64,9 +60,8 @@ impl Mutation {
                 let result =
                     BroadcastRoom::<String>::create_room(name, offer, room_type.into()).await?;
                 {
-                    let mut room_lock = state.chat_rooms.map.lock().await;
                     let room_mutex = Arc::new(AsyncMutex::new(result.broadcast_room));
-                    room_lock.insert(name2, room_mutex.clone());
+                    state.chat_rooms.insert(&name2, room_mutex.clone()).await;
                 }
                 Ok(result.offer)
             }
@@ -88,13 +83,13 @@ impl Mutation {
         // traits as they can be stored in a box with dynamic size
         // or working with boxes?
         match room_type {
-            RoomType::Float => match state.float_rooms.map.lock().await.get(&name) {
+            RoomType::Float => match state.float_rooms.get(&name).await {
                 Some(broadcast_room) => {
                     return Ok(broadcast_room.lock().await.join_room(&offer).await?)
                 }
                 None => return Err(format!("No such room {name}").into()),
             },
-            RoomType::Chat => match state.chat_rooms.map.lock().await.get(&name) {
+            RoomType::Chat => match state.chat_rooms.get(&name).await {
                 Some(broadcast_room) => {
                     return Ok(broadcast_room.lock().await.join_room(&offer).await?)
                 }
