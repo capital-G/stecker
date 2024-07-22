@@ -48,7 +48,7 @@ Alpine.store("stecker", {
       this.value = dataView.getFloat32();
       // this.log(`Message from DataChannel '${this.sendChannel.label}' payload '${dataView.getFloat32()}'`);
     };
-    
+
     this.pc.oniceconnectionstatechange = (e) => this.log(this.pc.iceConnectionState);
     this.pc.onicecandidate = (event) => {
       if (event.candidate === null) {
@@ -57,12 +57,12 @@ Alpine.store("stecker", {
         );
       }
     };
-    
+
     this.pc.onnegotiationneeded = (e) =>
       this.pc
         .createOffer()
         .then((d) => this.pc.setLocalDescription(d))
-        .catch(s.log); 
+        .catch(s.log);
   },
 
   async createRoom(name) {

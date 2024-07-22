@@ -13,7 +13,7 @@ namespace SuperStecker
 
         // +1 b/c of null termination
         const int allocSize = (strSize + 1) * sizeof(char);
-        
+
         // necessary so ClearUnitIfMemFailed works
         Unit* unit = (Unit*) this;
         char* buff = (char*) RTAlloc(mWorld, allocSize);
@@ -34,7 +34,7 @@ namespace SuperStecker
     }
 
     /*
-    
+
     SuperStecker IN
 
     */
@@ -60,7 +60,7 @@ namespace SuperStecker
     }
 
     /*
-    
+
     SuperStecker OUT
 
     */
