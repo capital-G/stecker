@@ -86,7 +86,7 @@ impl SteckerSendable for String {
     type T = String;
 
     fn to_stecker_data(&self) -> anyhow::Result<Bytes> {
-        todo!()
+        Ok(self.clone().into())
     }
 
     fn from_stecker_data<T>(data: &DataChannelMessage) -> anyhow::Result<Self::T> {

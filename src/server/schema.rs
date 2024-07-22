@@ -94,7 +94,7 @@ impl Mutation {
                 }
                 None => return Err(format!("No such room {name}").into()),
             },
-            RoomType::Chat => match state.float_rooms.map.lock().await.get(&name) {
+            RoomType::Chat => match state.chat_rooms.map.lock().await.get(&name) {
                 Some(broadcast_room) => {
                     return Ok(broadcast_room.lock().await.join_room(&offer).await?)
                 }
