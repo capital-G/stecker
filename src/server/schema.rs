@@ -15,8 +15,20 @@ impl Query {
         let state = ctx.data_unchecked::<AppState>();
 
         match room_type {
-            RoomType::Float => state.float_rooms.values().await,
-            RoomType::Chat => state.chat_rooms.values().await,
+            RoomType::Float => state
+                .float_rooms
+                .values()
+                .await
+                .into_iter()
+                .map(|r| r.into())
+                .collect(),
+            RoomType::Chat => state
+                .chat_rooms
+                .values()
+                .await
+                .into_iter()
+                .map(|a| a.into())
+                .collect(),
         }
     }
 }

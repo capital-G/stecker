@@ -34,9 +34,9 @@ impl AppState {
     }
 }
 
-pub struct RoomMap<R: Into<Room> + Clone>(Mutex<HashMap<String, Arc<Mutex<R>>>>);
+pub struct RoomMap<R: Clone>(Mutex<HashMap<String, Arc<Mutex<R>>>>);
 
-impl<R: Into<Room> + Clone> RoomMap<R> {
+impl<R: Clone> RoomMap<R> {
     pub async fn clear(&self) {
         let mut map_lock = self.0.lock().await;
         *map_lock = HashMap::new();
@@ -54,14 +54,14 @@ impl<R: Into<Room> + Clone> RoomMap<R> {
         self.0.lock().await.contains_key(room_name)
     }
 
-    pub async fn values(&self) -> Vec<Room> {
+    pub async fn values(&self) -> Vec<R> {
         let map_lock = self.0.lock().await;
 
         let mut rooms = Vec::new();
 
         for (_, room_arc) in map_lock.iter() {
             let room_lock = room_arc.lock().await;
-            rooms.push((*room_lock).clone().into());
+            rooms.push((*room_lock).clone());
         }
         rooms
     }

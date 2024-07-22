@@ -158,13 +158,13 @@ pub enum AnyBroadcastRoom {
     ChatBroadcastRoom(BroadcastRoom<String>),
 }
 
-impl<T: Clone> Into<Room> for BroadcastRoom<T> {
-    fn into(self) -> Room {
-        Room {
-            uuid: self.uuid.to_string(),
-            name: self.name.to_string(),
+impl<T: Clone> From<BroadcastRoom<T>> for Room {
+    fn from(value: BroadcastRoom<T>) -> Self {
+        Self {
+            uuid: value.uuid.to_string(),
+            name: value.name.to_string(),
             num_listeners: 0,
-            room_type: self.room_type.into(),
+            room_type: value.room_type.into(),
         }
     }
 }
