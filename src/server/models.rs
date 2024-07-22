@@ -57,7 +57,7 @@ pub struct BroadcastRoomWithOffer<T: Clone> {
     pub offer: ResponseOffer,
 }
 
-impl<T: SteckerSendable<T = T>> BroadcastRoom<T> {
+impl<T: SteckerSendable> BroadcastRoom<T> {
     pub async fn create_room(
         name: String,
         offer: String,
