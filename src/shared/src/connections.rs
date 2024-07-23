@@ -1,8 +1,7 @@
-use crate::models::{ChannelName, DataChannelMap, GenericDataChannelMap, RoomType, SteckerDataChannel, SteckerSendable, SteckerDataChannelTrait};
+use crate::models::{ChannelName, DataChannelMap, RoomType, SteckerDataChannel, SteckerSendable};
 use crate::utils::{decode_b64, encode_offer};
 
 use std::collections::HashMap;
-use std::fmt::Display;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::{Arc, Mutex};
@@ -17,11 +16,6 @@ use webrtc::peer_connection::configuration::RTCConfiguration;
 use webrtc::peer_connection::sdp::session_description::RTCSessionDescription;
 use webrtc::peer_connection::RTCPeerConnection;
 
-#[derive(Debug, Display)]
-enum SteckerDataChannelEnum {
-    Float(Arc<SteckerDataChannel<f32>>),
-    String(Arc<SteckerDataChannel<String>>),
-}
 
 pub struct SteckerWebRTCConnection {
     peer_connection: RTCPeerConnection,
@@ -31,17 +25,6 @@ pub struct SteckerWebRTCConnection {
     // them explicitly.
     string_data_channel_map: DataChannelMap<String>,
     float_data_channel_map: DataChannelMap<f32>,
-    data_channel_map: DataChannelMap<SteckerDataChannelEnum>,
-}
-
-impl SteckerSendable for SteckerDataChannelEnum {
-    fn to_stecker_data(&self) -> anyhow::Result<bytes::Bytes> {
-        todo!()
-    }
-
-    fn from_stecker_data(data: &DataChannelMessage) -> anyhow::Result<Self> {
-        todo!()
-    }
 }
 
 impl SteckerWebRTCConnection {
@@ -67,11 +50,8 @@ impl SteckerWebRTCConnection {
 
         Ok(Self {
             peer_connection: api.new_peer_connection(config).await?,
-            // data_channel: Mutex::new(None),
-            // meta_channel: SteckerDataChannel::<String>::create_channels(),
             string_data_channel_map: DataChannelMap(Mutex::new(HashMap::new())),
             float_data_channel_map: DataChannelMap(Mutex::new(HashMap::new())),
-            data_channel_map: GenericDataChannelMap(Mutex::new(HashMap::new())),
         })
     }
 
@@ -203,7 +183,6 @@ impl SteckerWebRTCConnection {
     pub fn register_data_channel<T: SteckerSendable>(&self, room_type: &RoomType) -> Arc<SteckerDataChannel<T>> {
         let stecker_channel = Arc::new(SteckerDataChannel::<T>::create_channels());
         let label = ChannelName::from(room_type);
-        self.data_channel_map.0.lock().unwrap().insert(label, stecker_channel.clone());
 
         match room_type {
             RoomType::Float => {self.float_data_channel_map.0.lock().unwrap().insert(label, stecker_channel);},
@@ -212,23 +191,6 @@ impl SteckerWebRTCConnection {
         };
         stecker_channel
     }
-
-    pub fn register_string_data_channel(&self, room_type: &RoomType) -> Arc<SteckerDataChannel<String>> {
-        let stecker_channel = Arc::new(SteckerDataChannel::<String>::create_channels());
-        self.string_data_channel_map.0.lock().unwrap().insert(ChannelName::from(room_type).to_string(), stecker_channel.clone());
-        stecker_channel
-    }
-
-    pub fn register_float_data_channel(&self, room_type: &RoomType) -> Arc<SteckerDataChannel<f32>> {
-        let stecker_channel = Arc::new(SteckerDataChannel::<f32>::create_channels());
-        self.float_data_channel_map.0.lock().unwrap().insert(ChannelName::from(room_type).to_string(), stecker_channel.clone());
-        stecker_channel
-    }
-
-    // pub fn register_data_channel<T: SteckerSendable>(self, room_type: &RoomType) -> Arc<SteckerDataChannel<T>> {
-    //     let stecker_channel = Arc::new(SteckerDataChannel::<T>::create_channels());
-    //     stecker_channel
-    // }
 
     // other party builds data channel and we listen for it
     // should only be called once.
@@ -311,17 +273,3 @@ impl SteckerWebRTCConnection {
         Ok(stecker_channel2)
     }
 }
-
-// trait RegisterDataChannel {
-//     fn register_data_channel(&self,room_type: &RoomType) -> Arc<SteckerDataChannel<Self>>
-//     where
-//         Self: SteckerSendable;
-// }
-
-// impl RegisterDataChannel for f32 {
-//     fn register_data_channel(&self, room_type: &RoomType) -> Arc<SteckerDataChannel<f32>> {
-//         let stecker_channel = Arc::new(SteckerDataChannel::<f32>::create_channels());
-//         self.map.0.lock().unwrap().insert(ChannelName::from(room_type).to_string(), stecker_channel.clone());
-//         stecker_channel
-//     }
-// }

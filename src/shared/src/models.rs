@@ -152,16 +152,3 @@ impl<T: SteckerSendable> DataChannelMap<T> {
         self.0.lock().unwrap().get(channel_name).map(|a| a.clone())
     }
 }
-
-
-pub trait SteckerDataChannelTrait {
-
-}
-
-impl SteckerDataChannelTrait for f32 {
-
-}
-
-impl SteckerDataChannelTrait for String {
-
-}
