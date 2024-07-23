@@ -35,7 +35,7 @@ impl Room {
         thread::spawn(move || {
             let rt = Runtime::new().unwrap();
             rt.block_on(async {
-                let connection = SteckerWebRTCConnection::build_connection().await.unwrap();
+                let mut connection = SteckerWebRTCConnection::build_connection().await.unwrap();
                 let stecker_data_channel = connection.create_data_channel::<f32>(&ChannelName::from(RoomType::Float)).await.unwrap();
                 let offer = connection.create_offer().await.unwrap();
 
@@ -48,7 +48,7 @@ impl Room {
                         connection.set_remote_description(answer).await.unwrap();
 
                         let mut inbound_receiver = stecker_data_channel.inbound.clone().subscribe();
-                        let mut webrtc_close_receiver = stecker_data_channel.close_trigger.clone().subscribe();
+                        let mut webrtc_close_receiver = stecker_data_channel.close.clone().subscribe();
                         let mut consume = true;
 
                         while consume {
@@ -112,7 +112,7 @@ impl Room {
         thread::spawn(move || {
             let rt = Runtime::new().unwrap();
             rt.block_on(async {
-                let connection = SteckerWebRTCConnection::build_connection().await?;
+                let mut connection = SteckerWebRTCConnection::build_connection().await?;
                 let stecker_data_channel = connection
                     .create_data_channel::<f32>(&ChannelName::from(RoomType::Float))
                     .await?;
@@ -120,7 +120,7 @@ impl Room {
 
                 tokio::spawn(async move {
                     let mut consume = true;
-                    let mut webrtc_close_receiver = stecker_data_channel.close_trigger.clone().subscribe();
+                    let mut webrtc_close_receiver = stecker_data_channel.close.clone().subscribe();
 
                     while consume {
                         tokio::select! {

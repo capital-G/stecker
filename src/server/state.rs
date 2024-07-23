@@ -75,11 +75,11 @@ impl<T: Clone> RoomMapTrait for RoomMap<T> {
     async fn get_rooms(&self) -> Vec<Room> {
         let map_lock = self.map.lock().await;
 
-        let mut rooms = Vec::new();
-
+        let mut rooms: Vec<Room> = Vec::with_capacity(map_lock.len());
         for (_, room_arc) in map_lock.iter() {
             let room_lock = room_arc.lock().await;
-            rooms.push((*room_lock).clone().into());
+            let room: Room = (&*room_lock).into();
+            rooms.push(room.clone());
         }
         rooms
     }

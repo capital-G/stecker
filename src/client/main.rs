@@ -6,7 +6,7 @@ use clap::{Parser, Subcommand};
 use models::ClientRoomType;
 use shared::api::APIClient;
 use shared::connections::SteckerWebRTCConnection;
-use shared::models::{ChannelName, PublicRoomType, RoomType, SteckerSendable};
+use shared::models::{PublicRoomType, RoomType, SteckerSendable};
 
 const LOCAL_HOST: &str = "http://127.0.0.1:8000";
 
@@ -79,10 +79,10 @@ async fn main() {
         }) => {
             let _ = match room_type {
                 ClientRoomType::Chat => {
-                    let _ = join_room::<String>(name, host, room_type.clone());
+                    let _ = join_room::<String>(name, host, room_type).await;
                 }
                 ClientRoomType::Float => {
-                    let _ = join_room::<f32>(name, host, room_type.clone());
+                    let _ = join_room::<f32>(name, host, room_type).await;
                 }
             };
         }
@@ -98,12 +98,20 @@ async fn create_room<T: SteckerSendable>(
 ) -> anyhow::Result<()> {
     let connection = SteckerWebRTCConnection::build_connection().await?;
 
-    let public_room_type: PublicRoomType = client_room_type.clone().into();
-    let default_channel_name = ChannelName::from(RoomType::from(public_room_type.into()));
+    let public_room_type = PublicRoomType::from(client_room_type.clone());
+    let room_type = RoomType::from(client_room_type);
 
-    let stecker_data_channel = connection
-        .create_data_channel::<T>(&default_channel_name)
-        .await?;
+    match room_type {
+        RoomType::Float => connection.register_data_channel::<f32>(room_type),
+        RoomType::Chat => todo!(),
+        RoomType::Meta => todo!(),
+    }
+
+    let stecker_data_channel = connection.
+        register_data_channel::<T>(&room_type);
+
+    let meta_data_channel = connection.create_data_channel::<String>(&RoomType::Meta).await?;
+    let mut meta_msg_receiver = meta_data_channel.inbound.subscribe();
 
     let offer = connection.create_offer().await?;
 
@@ -112,7 +120,7 @@ async fn create_room<T: SteckerSendable>(
     };
 
     match api_client
-        .create_room(name, &client_room_type.into(), &offer)
+        .create_room(name, &public_room_type, &offer)
         .await
     {
         Ok(answer) => {
@@ -131,6 +139,12 @@ async fn create_room<T: SteckerSendable>(
                         println!("Send out {value}");
                         let _ = stecker_data_channel.outbound.send(value.clone());
                     },
+                    raw_meta_msg = meta_msg_receiver.recv() => {
+                        match raw_meta_msg {
+                            Ok(meta_msg) => println!("META: {meta_msg}"),
+                            Err(err) => println!("Failed to receive meta message: {err}"),
+                        }
+                    }
                     _ = tokio::signal::ctrl_c() => {
                         println!("Pressed ctrl-c - shutting down");
                         break
@@ -148,15 +162,14 @@ async fn create_room<T: SteckerSendable>(
 async fn join_room<T: SteckerSendable>(
     name: &str,
     host: &str,
-    client_room_type: ClientRoomType,
+    client_room_type: &ClientRoomType,
 ) -> anyhow::Result<()> {
-    let connection = SteckerWebRTCConnection::build_connection().await?;
+    let public_room_type = PublicRoomType::from(client_room_type.clone());
+    let room_type = RoomType::from(client_room_type.clone());
 
-    let public_room_type: PublicRoomType = client_room_type.into();
-    let default_channel_name = ChannelName::from(RoomType::from(public_room_type.clone().into()));
-
+    let connection = SteckerWebRTCConnection::build_connection().await.expect("Something wrong?");
     let stecker_data_channel = connection
-        .create_data_channel::<T>(&default_channel_name)
+        .create_data_channel::<T>(&room_type)
         .await?;
     let offer = connection.create_offer().await?;
 
@@ -172,7 +185,7 @@ async fn join_room<T: SteckerSendable>(
             println!("Press ctrl-c to stop");
 
             let mut receiver = stecker_data_channel.inbound.clone().subscribe();
-            let mut close_receiver = stecker_data_channel.close_trigger.clone().subscribe();
+            let mut close_receiver = stecker_data_channel.close.clone().subscribe();
 
             loop {
                 tokio::select! {
@@ -199,6 +212,9 @@ async fn join_room<T: SteckerSendable>(
             connection.close().await?;
             Ok(())
         }
-        Err(err) => Err(err),
+        Err(err) => {
+            println!("Wrong server reply: {err}");
+            Err(err)
+        },
     }
 }

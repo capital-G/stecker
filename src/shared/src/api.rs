@@ -1,5 +1,5 @@
 use crate::{
-    models::{PublicRoomType, RoomType},
+    models::PublicRoomType,
     utils::decode_b64,
 };
 use anyhow::bail;
