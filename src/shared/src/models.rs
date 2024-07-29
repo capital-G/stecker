@@ -65,10 +65,13 @@ pub struct SteckerDataChannel {
     pub outbound: Sender<SteckerData>,
     /// triggers when connection was closed
     pub close: Sender<()>,
+    // necessary for async matching via listening
+    // on data channels.
+    pub channel_type: SteckerDataChannelType,
 }
 
 impl SteckerDataChannel {
-    pub fn create_channels() -> Self {
+    pub fn create_channels(channel_type: SteckerDataChannelType) -> Self {
         let capacity: usize = 1024;
 
         let (inbound, _) = broadcast::channel::<SteckerData>(capacity);
@@ -79,6 +82,7 @@ impl SteckerDataChannel {
             inbound,
             outbound,
             close,
+            channel_type,
         }
     }
 }
@@ -115,8 +119,8 @@ impl SteckerData {
 impl Display for SteckerData {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match &self {
-            SteckerData::F32(value) => write!(f, "f32({})", value),
-            SteckerData::String(value) => write!(f, "str({})", value),
+            SteckerData::F32(value) => write!(f, "F32({})", value),
+            SteckerData::String(value) => write!(f, "String({})", value),
         }
     }
 }

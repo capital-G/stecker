@@ -132,7 +132,6 @@ impl SteckerWebRTCConnection {
         }));
 
         data_channel.on_open(Box::new(move || {
-            // println!("Opened channel");
             Box::pin(async move {
                 let mut outbound_msg_rx = stecker_channel2.outbound.subscribe();
                 let mut close_rx = stecker_channel2.close.subscribe();
@@ -144,6 +143,7 @@ impl SteckerWebRTCConnection {
                         msg_to_send = outbound_msg_rx.recv() => {
                             match msg_to_send {
                                 Ok(msg) => {
+                                    // println!("Send out message: {msg}");
                                     let _ = data_channel2.send(&msg.encode().unwrap()).await;
                                 },
                                 Err(err) => {
@@ -186,7 +186,9 @@ impl SteckerWebRTCConnection {
     /// Remember to call start_listening_for_data_channel to start listening
     /// for channels from the other side.
     pub fn register_channel(&self, room_type: &RoomType) -> Arc<SteckerDataChannel> {
-        let stecker_channel = Arc::new(SteckerDataChannel::create_channels());
+        let stecker_channel = Arc::new(SteckerDataChannel::create_channels(
+            SteckerDataChannelType::from(room_type.clone()),
+        ));
         let label = ChannelName::from(room_type);
         self.data_channel_map
             .lock()
@@ -203,7 +205,8 @@ impl SteckerWebRTCConnection {
             .on_data_channel(Box::new(move |d: Arc<RTCDataChannel>| {
                 // println!("Successfully listened for channel {}", d.label());
                 if let Some(stecker_channel) = map.lock().unwrap().get(d.label()) {
-                    Self::connect_channel(d, stecker_channel, SteckerDataChannelType::Float);
+                    let channel_type = stecker_channel.channel_type.clone();
+                    Self::connect_channel(d, stecker_channel, channel_type);
                     Box::pin(async {})
                 } else {
                     println!(
@@ -220,7 +223,8 @@ impl SteckerWebRTCConnection {
         &self,
         room_type: &RoomType,
     ) -> anyhow::Result<SteckerDataChannel> {
-        let stecker_channel = SteckerDataChannel::create_channels();
+        let stecker_channel =
+            SteckerDataChannel::create_channels(SteckerDataChannelType::from(room_type.clone()));
         let stecker_channel2 = Arc::new(stecker_channel.clone());
 
         let data_channel = self

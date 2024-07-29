@@ -1,7 +1,7 @@
 use async_graphql::{Enum, SimpleObject};
 use shared::{
     connections::SteckerWebRTCConnection,
-    models::{RoomType as SharedRoomType, SteckerData},
+    models::{RoomType as SharedRoomType, SteckerData, SteckerDataChannelType},
 };
 use tokio::sync::broadcast::Sender;
 use uuid::Uuid;
@@ -15,11 +15,11 @@ pub enum RoomType {
     Chat,
 }
 
-impl Into<SharedRoomType> for RoomType {
-    fn into(self) -> SharedRoomType {
-        match self {
-            RoomType::Float => SharedRoomType::Float,
-            RoomType::Chat => SharedRoomType::Chat,
+impl From<RoomType> for SharedRoomType {
+    fn from(value: RoomType) -> Self {
+        match value {
+            RoomType::Float => Self::Float,
+            RoomType::Chat => Self::Chat,
         }
     }
 }

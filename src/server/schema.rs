@@ -42,7 +42,7 @@ impl Mutation {
     ) -> Result<String> {
         let state = ctx.data_unchecked::<AppState>();
 
-        let shared_room_type: SharedRoomType = room_type.into();
+        let shared_room_type = SharedRoomType::from(room_type);
         if state.room_exists(&name, &room_type).await {
             return Err(format!("{shared_room_type} with name {name} already exists.").into());
         }

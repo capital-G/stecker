@@ -66,7 +66,7 @@ async fn main() {
                         name,
                         host,
                         room_type.clone(),
-                        SteckerData::String("Something to say?".to_string()),
+                        SteckerData::String("Hello?".to_string()),
                     )
                     .await
                 }
@@ -163,9 +163,7 @@ async fn join_room(
     let public_room_type = PublicRoomType::from(client_room_type.clone());
     let room_type = RoomType::from(client_room_type.clone());
 
-    let connection = SteckerWebRTCConnection::build_connection()
-        .await
-        .expect("Something wrong?");
+    let connection = SteckerWebRTCConnection::build_connection().await?;
 
     let stecker_data_channel = connection.create_data_channel(&room_type).await?;
     let stecker_meta_channel = connection.create_data_channel(&RoomType::Meta).await?;
@@ -192,10 +190,7 @@ async fn join_room(
                     msg = receiver.recv() => {
                         match msg {
                             Ok(stecker_data) => {
-                                match stecker_data {
-                                    SteckerData::F32(float_msg) => {println!("Received (f32): {float_msg}");},
-                                    SteckerData::String(string_msg) => {println!("Received (str): {string_msg}");},
-                                }
+                                println!("Received {stecker_data}");
                             },
                             Err(err) => {
                                 println!("Error while receiving message - stop consuming messages: {err}");
