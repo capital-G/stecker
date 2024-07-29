@@ -9,9 +9,9 @@ pub struct AppState {
     // code duplication due to pattern matching or creating a shared
     // generic trait which could be boxed, we simply create an
     // HashMap for each room type we have
-    pub float_rooms: RoomMap<f32>,
-    pub chat_rooms: RoomMap<String>, // pub chat_rooms: Mutex<HashMap<String, Arc<Mutex<BroadcastRoom<String>>>>>,
-                                     // pub float_rooms: Mutex<HashMap<String, Arc<Mutex<BroadcastRoom<f32>>>>>,
+    pub float_rooms: RoomMap,
+    pub chat_rooms: RoomMap, // pub chat_rooms: Mutex<HashMap<String, Arc<Mutex<BroadcastRoom<String>>>>>,
+                             // pub float_rooms: Mutex<HashMap<String, Arc<Mutex<BroadcastRoom<f32>>>>>,
 }
 
 impl AppState {
@@ -39,32 +39,28 @@ impl AppState {
     }
 }
 
-pub struct RoomMap<T: Clone> {
-    pub map: Mutex<HashMap<String, Arc<Mutex<BroadcastRoom<T>>>>>,
+pub struct RoomMap {
+    pub map: Mutex<HashMap<String, Arc<Mutex<BroadcastRoom>>>>,
 }
 
 pub trait RoomMapTrait {
-    type RoomValue;
-
     fn reset_state(&self) -> impl Future<Output = ()>;
     fn insert_room(
         &self,
         room_name: &str,
-        room: Arc<Mutex<Self::RoomValue>>,
+        room: Arc<Mutex<BroadcastRoom>>,
     ) -> impl Future<Output = ()>;
     fn room_exists(&self, room_name: &str) -> impl Future<Output = bool>;
     fn get_rooms(&self) -> impl Future<Output = Vec<Room>>;
 }
 
-impl<T: Clone> RoomMapTrait for RoomMap<T> {
-    type RoomValue = BroadcastRoom<T>;
-
+impl RoomMapTrait for RoomMap {
     async fn reset_state(&self) {
         let mut map_lock = self.map.lock().await;
         *map_lock = HashMap::new();
     }
 
-    async fn insert_room(&self, room_name: &str, room: Arc<Mutex<Self::RoomValue>>) {
+    async fn insert_room(&self, room_name: &str, room: Arc<Mutex<BroadcastRoom>>) {
         self.map.lock().await.insert(room_name.to_string(), room);
     }
 

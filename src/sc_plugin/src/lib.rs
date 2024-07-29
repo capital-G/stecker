@@ -8,7 +8,7 @@ use tokio::sync::broadcast;
 use shared::{
     api::APIClient,
     connections::SteckerWebRTCConnection,
-    models::{ChannelName, RoomType},
+    models::{RoomType, SteckerData},
 };
 
 pub struct Room {
@@ -35,45 +35,54 @@ impl Room {
         thread::spawn(move || {
             let rt = Runtime::new().unwrap();
             rt.block_on(async {
-                let mut connection = SteckerWebRTCConnection::build_connection().await.unwrap();
-                let stecker_data_channel = connection.create_data_channel::<f32>(&ChannelName::from(RoomType::Float)).await.unwrap();
+                let connection = SteckerWebRTCConnection::build_connection().await.unwrap();
+                let stecker_data_channel = connection
+                    .create_data_channel(&RoomType::Float)
+                    .await
+                    .unwrap();
+                let meta_data_channel = connection
+                    .create_data_channel(&RoomType::Meta)
+                    .await
+                    .unwrap();
                 let offer = connection.create_offer().await.unwrap();
 
-                let api_client = APIClient {
-                    host: host2,
-                };
+                let api_client = APIClient { host: host2 };
 
-                match api_client.join_room(&name2, &shared::models::PublicRoomType::Float, &offer).await {
+                match api_client
+                    .join_room(&name2, &shared::models::PublicRoomType::Float, &offer)
+                    .await
+                {
                     Ok(answer) => {
                         connection.set_remote_description(answer).await.unwrap();
 
                         let mut inbound_receiver = stecker_data_channel.inbound.clone().subscribe();
-                        let mut webrtc_close_receiver = stecker_data_channel.close.clone().subscribe();
-                        let mut consume = true;
+                        let mut meta_receiver = meta_data_channel.inbound.clone().subscribe();
+                        let mut webrtc_close_receiver =
+                            stecker_data_channel.close.clone().subscribe();
 
-                        while consume {
+                        loop {
                             tokio::select! {
                                 msg = inbound_receiver.recv() => {
-                                    match msg {
-                                        Ok(m) => {
-                                            match sender.send(m) {
-                                                Ok(_) => {}
-                                                Err(err) => {
-                                                    println!("Error while forwarding WebRTC message to SC: {err}");
-                                                    consume = false;
-                                                }
-                                            }
-                                        }
-                                        Err(err) => println!("Error while receiving WebRTC message: {err}"),
+                                    if let Ok(SteckerData::F32(m)) = msg {
+                                        let _ = sender.send(m);
+                                    } else {
+                                        println!("Error on forwarding message to webrtc");
                                     }
                                 },
+                                meta_msg = meta_receiver.recv() => {
+                                    if let Ok(SteckerData::String(m)) = meta_msg {
+                                        println!("META: {m}");
+                                    } else {
+                                        println!("Error on receiving meta message")
+                                    }
+                                }
                                 _ = webrtc_close_receiver.recv() => {
                                     println!("received webrtc close signal!");
-                                    consume = false;
+                                    break
                                 }
                                 _ = sc_close_receiver.recv() => {
                                     println!("Received supercollider close signal");
-                                    consume = false;
+                                    break
                                 }
                             }
                         }
@@ -112,9 +121,9 @@ impl Room {
         thread::spawn(move || {
             let rt = Runtime::new().unwrap();
             rt.block_on(async {
-                let mut connection = SteckerWebRTCConnection::build_connection().await?;
+                let connection = SteckerWebRTCConnection::build_connection().await?;
                 let stecker_data_channel = connection
-                    .create_data_channel::<f32>(&ChannelName::from(RoomType::Float))
+                    .create_data_channel(&RoomType::Float)
                     .await?;
                 let offer = connection.create_offer().await?;
 
@@ -127,7 +136,7 @@ impl Room {
                             msg_result = receiver.recv() =>{
                                 match msg_result {
                                     Ok(msg) => {
-                                        let _ = stecker_data_channel.outbound.send(msg);
+                                        let _ = stecker_data_channel.outbound.send(SteckerData::F32(msg));
                                     },
                                     Err(err) => {
                                         println!("Got an error while pushing messages out: {err}");

@@ -48,29 +48,18 @@ impl Mutation {
         }
 
         let name2 = name.clone();
+        println!("Created new room {name2}");
 
-        match room_type {
-            RoomType::Float => {
-                let result =
-                    BroadcastRoom::<f32>::create_room(name, offer, room_type.into()).await?;
-                {
-                    let mut room_lock = state.float_rooms.map.lock().await;
-                    let room_mutex = Arc::new(AsyncMutex::new(result.broadcast_room));
-                    room_lock.insert(name2, room_mutex.clone());
-                }
-                Ok(result.offer)
-            }
-            RoomType::Chat => {
-                let result =
-                    BroadcastRoom::<String>::create_room(name, offer, room_type.into()).await?;
-                {
-                    let mut room_lock = state.chat_rooms.map.lock().await;
-                    let room_mutex = Arc::new(AsyncMutex::new(result.broadcast_room));
-                    room_lock.insert(name2, room_mutex.clone());
-                }
-                Ok(result.offer)
-            }
+        let result = BroadcastRoom::create_room(name, offer, room_type.into()).await?;
+        {
+            let mut room_lock = match room_type {
+                RoomType::Float => state.float_rooms.map.lock().await,
+                RoomType::Chat => state.chat_rooms.map.lock().await,
+            };
+            let room_mutex = Arc::new(AsyncMutex::new(result.broadcast_room));
+            room_lock.insert(name2, room_mutex.clone());
         }
+        Ok(result.offer)
     }
 
     async fn join_room<'a>(
@@ -82,24 +71,15 @@ impl Mutation {
     ) -> Result<String> {
         let state = ctx.data_unchecked::<AppState>();
 
-        // some of duplication b/c room is generic and string/float
-        // have different size so they can not be stored in a generic
-        // variable. Maybe it is better to replace everything via
-        // traits as they can be stored in a box with dynamic size
-        // or working with boxes?
         match room_type {
             RoomType::Float => match state.float_rooms.map.lock().await.get(&name) {
-                Some(broadcast_room) => {
-                    return Ok(broadcast_room.lock().await.join_room(&offer).await?)
-                }
-                None => return Err(format!("No such room {name}").into()),
+                Some(broadcast_room) => Ok(broadcast_room.lock().await.join_room(&offer).await?),
+                None => Err(format!("No such room {name}").into()),
             },
             RoomType::Chat => match state.chat_rooms.map.lock().await.get(&name) {
-                Some(broadcast_room) => {
-                    return Ok(broadcast_room.lock().await.join_room(&offer).await?)
-                }
-                None => return Err(format!("No such room {name}").into()),
+                Some(broadcast_room) => Ok(broadcast_room.lock().await.join_room(&offer).await?),
+                None => Err(format!("No such room {name}").into()),
             },
-        };
+        }
     }
 }
