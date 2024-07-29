@@ -1,7 +1,7 @@
 use async_graphql::{Enum, SimpleObject};
 use shared::{
     connections::SteckerWebRTCConnection,
-    models::{RoomType as SharedRoomType, SteckerData, SteckerDataChannelType},
+    models::{RoomType as SharedRoomType, SteckerData},
 };
 use tokio::sync::broadcast::Sender;
 use uuid::Uuid;
