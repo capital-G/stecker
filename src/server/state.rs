@@ -5,13 +5,8 @@ use tokio::sync::Mutex;
 use crate::models::{BroadcastRoom, Room, RoomType};
 
 pub struct AppState {
-    // in order to avoid dynamic dispatching which involves lots of
-    // code duplication due to pattern matching or creating a shared
-    // generic trait which could be boxed, we simply create an
-    // HashMap for each room type we have
     pub float_rooms: RoomMap,
-    pub chat_rooms: RoomMap, // pub chat_rooms: Mutex<HashMap<String, Arc<Mutex<BroadcastRoom<String>>>>>,
-                             // pub float_rooms: Mutex<HashMap<String, Arc<Mutex<BroadcastRoom<f32>>>>>,
+    pub chat_rooms: RoomMap,
 }
 
 impl AppState {
