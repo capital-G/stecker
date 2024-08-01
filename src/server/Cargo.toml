@@ -6,7 +6,7 @@ version = "0.1.0"
 [dependencies]
 shared = { path = "../shared" }
 webrtc = "0.10.1"
-tokio = { version = "1.36.0", features = ["full"] }
+tokio = { version = "1.38.1", features = ["full"] }
 axum = "0.7.4"
 serde = "1.0.197"
 async-graphql = "7.0.2"

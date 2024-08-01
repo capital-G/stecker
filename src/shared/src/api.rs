@@ -1,7 +1,4 @@
-use crate::{
-    models::{PublicRoomType, RoomType},
-    utils::decode_b64,
-};
+use crate::{models::PublicRoomType, utils::decode_b64};
 use anyhow::bail;
 use reqwest::StatusCode;
 use serde::Deserialize;

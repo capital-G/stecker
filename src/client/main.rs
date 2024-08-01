@@ -6,7 +6,7 @@ use clap::{Parser, Subcommand};
 use models::ClientRoomType;
 use shared::api::APIClient;
 use shared::connections::SteckerWebRTCConnection;
-use shared::models::{ChannelName, PublicRoomType, RoomType, SteckerSendable};
+use shared::models::{PublicRoomType, RoomType, SteckerData};
 
 const LOCAL_HOST: &str = "http://127.0.0.1:8000";
 
@@ -59,14 +59,14 @@ async fn main() {
         }) => {
             let _ = match room_type {
                 ClientRoomType::Float => {
-                    create_room::<f32>(name, host, room_type.clone(), 42.0).await
+                    create_room(name, host, room_type.clone(), SteckerData::F32(42.0)).await
                 }
                 ClientRoomType::Chat => {
-                    create_room::<String>(
+                    create_room(
                         name,
                         host,
                         room_type.clone(),
-                        "some chat message".to_string(),
+                        SteckerData::String("Hello?".to_string()),
                     )
                     .await
                 }
@@ -79,10 +79,10 @@ async fn main() {
         }) => {
             let _ = match room_type {
                 ClientRoomType::Chat => {
-                    let _ = join_room::<String>(name, host, room_type.clone());
+                    let _ = join_room(name, host, room_type).await;
                 }
                 ClientRoomType::Float => {
-                    let _ = join_room::<f32>(name, host, room_type.clone());
+                    let _ = join_room(name, host, room_type).await;
                 }
             };
         }
@@ -90,29 +90,31 @@ async fn main() {
     }
 }
 
-async fn create_room<T: SteckerSendable>(
+async fn create_room(
     name: &str,
     host: &str,
     client_room_type: ClientRoomType,
-    value: T,
+    value: SteckerData,
 ) -> anyhow::Result<()> {
     let connection = SteckerWebRTCConnection::build_connection().await?;
 
-    let public_room_type: PublicRoomType = client_room_type.clone().into();
-    let default_channel_name = ChannelName::from(RoomType::from(public_room_type.into()));
+    let public_room_type = PublicRoomType::from(client_room_type.clone());
+    let room_type = RoomType::from(client_room_type.clone());
 
-    let stecker_data_channel = connection
-        .create_data_channel::<T>(&default_channel_name)
-        .await?;
+    let meta_data_channel = connection.create_data_channel(&RoomType::Meta).await?;
+    let mut meta_msg_receiver = meta_data_channel.inbound.subscribe();
 
-    let offer = connection.create_offer().await?;
+    let data_channel = connection.create_data_channel(&room_type).await?;
+    let data_outbound = data_channel.outbound.clone();
 
     let api_client = APIClient {
         host: host.to_string(),
     };
 
+    let offer = connection.create_offer().await?;
+
     match api_client
-        .create_room(name, &client_room_type.into(), &offer)
+        .create_room(name, &public_room_type, &offer)
         .await
     {
         Ok(answer) => {
@@ -127,37 +129,45 @@ async fn create_room<T: SteckerSendable>(
 
                 tokio::select! {
                     _ = timeout.as_mut() =>{
-                        // @todo check if the cloning can be reduced here?
-                        println!("Send out {value}");
-                        let _ = stecker_data_channel.outbound.send(value.clone());
+                        println!("Send value: {value}");
+                        let _ = data_outbound.send(value.clone());
                     },
+                    raw_meta_msg = meta_msg_receiver.recv() => {
+                        if let Ok(SteckerData::String(msg)) = raw_meta_msg {
+                            println!("META: {msg}");
+                        } else {
+                            println!("Error while receiving meta message");
+                        }
+                    }
                     _ = tokio::signal::ctrl_c() => {
                         println!("Pressed ctrl-c - shutting down");
                         break
                     }
                 };
             }
-            // should be a private method
             connection.close().await?;
             Ok(())
         }
-        Err(err) => Err(err),
+        Err(err) => {
+            println!("Could not create a room via the API: {err}");
+            Err(err)
+        }
     }
 }
 
-async fn join_room<T: SteckerSendable>(
+async fn join_room(
     name: &str,
     host: &str,
-    client_room_type: ClientRoomType,
+    client_room_type: &ClientRoomType,
 ) -> anyhow::Result<()> {
+    let public_room_type = PublicRoomType::from(client_room_type.clone());
+    let room_type = RoomType::from(client_room_type.clone());
+
     let connection = SteckerWebRTCConnection::build_connection().await?;
 
-    let public_room_type: PublicRoomType = client_room_type.into();
-    let default_channel_name = ChannelName::from(RoomType::from(public_room_type.clone().into()));
+    let stecker_data_channel = connection.create_data_channel(&room_type).await?;
+    let stecker_meta_channel = connection.create_data_channel(&RoomType::Meta).await?;
 
-    let stecker_data_channel = connection
-        .create_data_channel::<T>(&default_channel_name)
-        .await?;
     let offer = connection.create_offer().await?;
 
     let api_client = APIClient {
@@ -172,19 +182,29 @@ async fn join_room<T: SteckerSendable>(
             println!("Press ctrl-c to stop");
 
             let mut receiver = stecker_data_channel.inbound.clone().subscribe();
-            let mut close_receiver = stecker_data_channel.close_trigger.clone().subscribe();
+            let mut meta_receiver = stecker_meta_channel.inbound.clone().subscribe();
+            let mut close_receiver = stecker_data_channel.close.clone().subscribe();
 
             loop {
                 tokio::select! {
                     msg = receiver.recv() => {
                         match msg {
-                            Ok(m) => println!("received a message: {m}"),
+                            Ok(stecker_data) => {
+                                println!("Received {stecker_data}");
+                            },
                             Err(err) => {
                                 println!("Error while receiving message - stop consuming messages: {err}");
                                 break
                             },
                         }
                     }
+                    raw_meta_msg = meta_receiver.recv() => {
+                        if let Ok(SteckerData::String(msg)) = raw_meta_msg {
+                            println!("META: {msg}");
+                        } else {
+                            println!("Error while receiving meta message");
+                        }
+                    },
                     _ = close_receiver.recv() => {
                         println!("received close signal!");
                         break
@@ -199,6 +219,9 @@ async fn join_room<T: SteckerSendable>(
             connection.close().await?;
             Ok(())
         }
-        Err(err) => Err(err),
+        Err(err) => {
+            println!("Wrong server reply: {err}");
+            Err(err)
+        }
     }
 }
