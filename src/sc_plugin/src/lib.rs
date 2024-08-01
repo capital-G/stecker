@@ -1,21 +1,24 @@
 use std::str::FromStr;
 use std::thread;
 
-use tokio;
+use opus::{Channels, Encoder};
+use ringbuf::traits::{Consumer, Producer, Split};
+use ringbuf::wrap::caching::Caching;
+use ringbuf::{HeapCons, HeapProd, HeapRb, SharedRb};
 use tokio::runtime::Runtime;
-use tokio::sync::broadcast;
+use tokio::sync::broadcast::{self, Receiver, Sender};
 
 use shared::{
     api::APIClient,
     connections::SteckerWebRTCConnection,
-    models::{RoomType, SteckerData},
+    models::{DataRoomType, SteckerData},
 };
 
 pub struct Room {
     name: String,
-    receiver: broadcast::Receiver<f32>,
-    sender: broadcast::Sender<f32>,
-    close_sender: broadcast::Sender<()>,
+    receiver: Receiver<f32>,
+    sender: Sender<f32>,
+    close_sender: Sender<()>,
     // we need to remember the last value pulled
     // from the queue
     last_value: f32,
@@ -37,11 +40,11 @@ impl Room {
             rt.block_on(async {
                 let connection = SteckerWebRTCConnection::build_connection().await.unwrap();
                 let stecker_data_channel = connection
-                    .create_data_channel(&RoomType::Float)
+                    .create_data_channel(&DataRoomType::Float)
                     .await
                     .unwrap();
                 let meta_data_channel = connection
-                    .create_data_channel(&RoomType::Meta)
+                    .create_data_channel(&DataRoomType::Meta)
                     .await
                     .unwrap();
                 let offer = connection.create_offer().await.unwrap();
@@ -123,7 +126,7 @@ impl Room {
             rt.block_on(async {
                 let connection = SteckerWebRTCConnection::build_connection().await?;
                 let stecker_data_channel = connection
-                    .create_data_channel(&RoomType::Float)
+                    .create_data_channel(&DataRoomType::Float)
                     .await?;
                 let offer = connection.create_offer().await?;
 
@@ -206,6 +209,36 @@ impl Room {
         let _ = self.sender.send(value);
         1.0
     }
+}
+
+pub struct AudioRoom {
+    name: String,
+    close_sender: Sender<()>,
+    consumer: HeapCons<f32>,
+    producer: HeapProd<f32>,
+}
+
+impl AudioRoom {
+    pub fn create_room(name: &str, host: &str) -> Self {
+        // @todo ring buffer needs to have size of at least of ?
+        let ring_buffer = HeapRb::<f32>::new(48000);
+
+        let (producer, consumer) = ring_buffer.split();
+        let (close_tx, _) = broadcast::channel::<()>(2);
+
+        Self {
+            name: name.to_owned(),
+            close_sender: close_tx,
+            producer,
+            consumer,
+        }
+    }
+
+    pub fn push_values_to_webrtc(&mut self, values: Vec<f32>) {
+        self.producer.push_iter(values.into_iter());
+    }
+
+    pub fn start_streaming(&mut self) {}
 }
 
 fn create_room(name: &str, host: &str) -> Box<Room> {

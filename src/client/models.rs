@@ -1,5 +1,5 @@
 use clap::ValueEnum;
-use shared::models::{PublicRoomType, RoomType};
+use shared::models::{DataRoomType, PublicRoomType};
 
 #[derive(ValueEnum, Clone)]
 pub enum ClientRoomType {
@@ -16,11 +16,11 @@ impl From<ClientRoomType> for PublicRoomType {
     }
 }
 
-impl From<ClientRoomType> for RoomType {
+impl From<ClientRoomType> for DataRoomType {
     fn from(value: ClientRoomType) -> Self {
         match value {
-            ClientRoomType::Chat => RoomType::Chat,
-            ClientRoomType::Float => RoomType::Float,
+            ClientRoomType::Chat => DataRoomType::Chat,
+            ClientRoomType::Float => DataRoomType::Float,
         }
     }
 }

@@ -6,53 +6,61 @@ use std::{
 
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use tokio::sync::broadcast::{self, Sender};
-use webrtc::data_channel::data_channel_message::DataChannelMessage;
+use webrtc::{
+    data_channel::data_channel_message::DataChannelMessage,
+    track::track_local::track_local_static_rtp::TrackLocalStaticRTP,
+};
 
+/// the possible kinds of data rooms
 #[derive(Copy, Clone, Eq, PartialEq)]
-pub enum RoomType {
+pub enum DataRoomType {
     Float,
     Chat,
     Meta,
 }
 
-// users can not create a meta channel
+/// the possible kinds of data channels
+/// that are usable for the public
+/// via the server.
 #[derive(Copy, Clone)]
 pub enum PublicRoomType {
     Float,
     Chat,
 }
 
+/// the "raw" possible kinds of data channels
+/// which will be used internally
 #[derive(Clone, Copy)]
-pub enum SteckerDataChannelType {
+pub(crate) enum SteckerDataChannelType {
     Float,
     String,
 }
 
-impl From<RoomType> for SteckerDataChannelType {
-    fn from(value: RoomType) -> Self {
+impl From<DataRoomType> for SteckerDataChannelType {
+    fn from(value: DataRoomType) -> Self {
         match value {
-            RoomType::Float => SteckerDataChannelType::Float,
-            RoomType::Chat => SteckerDataChannelType::String,
-            RoomType::Meta => SteckerDataChannelType::String,
+            DataRoomType::Float => SteckerDataChannelType::Float,
+            DataRoomType::Chat => SteckerDataChannelType::String,
+            DataRoomType::Meta => SteckerDataChannelType::String,
         }
     }
 }
 
-impl Into<RoomType> for PublicRoomType {
-    fn into(self) -> RoomType {
+impl Into<DataRoomType> for PublicRoomType {
+    fn into(self) -> DataRoomType {
         match self {
-            PublicRoomType::Float => RoomType::Float,
-            PublicRoomType::Chat => RoomType::Chat,
+            PublicRoomType::Float => DataRoomType::Float,
+            PublicRoomType::Chat => DataRoomType::Chat,
         }
     }
 }
 
-impl Display for RoomType {
+impl Display for DataRoomType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match &self {
-            RoomType::Float => write!(f, "FloatRoom"),
-            RoomType::Chat => write!(f, "ChatRoom"),
-            RoomType::Meta => write!(f, "Meta"),
+            DataRoomType::Float => write!(f, "FloatRoom"),
+            DataRoomType::Chat => write!(f, "ChatRoom"),
+            DataRoomType::Meta => write!(f, "Meta"),
         }
     }
 }
@@ -127,12 +135,12 @@ impl Display for SteckerData {
 
 pub type ChannelName = String;
 
-impl From<&RoomType> for ChannelName {
-    fn from(value: &RoomType) -> Self {
+impl From<&DataRoomType> for ChannelName {
+    fn from(value: &DataRoomType) -> Self {
         match value {
-            RoomType::Float => "float".to_string(),
-            RoomType::Chat => "chat".to_string(),
-            RoomType::Meta => "meta".to_string(),
+            DataRoomType::Float => "float".to_string(),
+            DataRoomType::Chat => "chat".to_string(),
+            DataRoomType::Meta => "meta".to_string(),
         }
     }
 }
@@ -149,5 +157,26 @@ impl DataChannelMap {
 
     pub fn get(&self, channel_name: &str) -> Option<Arc<SteckerDataChannel>> {
         self.0.lock().unwrap().get(channel_name).map(|a| a.clone())
+    }
+}
+
+#[derive(Clone)]
+pub struct SteckerAudioChannel {
+    // pub audio_channel_tx: Sender<Arc<TrackLocalStaticRTP>>,
+    pub audio_channel_rx: tokio::sync::watch::Receiver<Option<Arc<TrackLocalStaticRTP>>>,
+    pub audio_channel_tx: tokio::sync::watch::Sender<Option<Arc<TrackLocalStaticRTP>>>,
+    pub close: Sender<()>,
+}
+
+impl SteckerAudioChannel {
+    pub fn create_channels() -> Self {
+        let (close, _) = broadcast::channel::<()>(1);
+        let (audio_channel_tx, audio_channel_rx) = tokio::sync::watch::channel(None);
+        // let (audio_channel_tx, _) = broadcast::channel::<Arc<TrackLocalStaticRTP>>(1);
+        SteckerAudioChannel {
+            audio_channel_tx,
+            audio_channel_rx,
+            close,
+        }
     }
 }

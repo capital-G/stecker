@@ -1,20 +1,32 @@
 use crate::models::{
-    ChannelName, DataChannelMap, RoomType, SteckerData, SteckerDataChannel, SteckerDataChannelType,
+    ChannelName, DataChannelMap, DataRoomType, SteckerAudioChannel, SteckerData,
+    SteckerDataChannel, SteckerDataChannelType,
 };
 use crate::utils::{decode_b64, encode_offer};
 
 use std::collections::HashMap;
+use std::fs::File;
+use std::io::BufReader;
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
+use tokio::time::sleep;
 use webrtc::api::interceptor_registry::register_default_interceptors;
-use webrtc::api::media_engine::MediaEngine;
+use webrtc::api::media_engine::{MediaEngine, MIME_TYPE_OPUS};
 use webrtc::api::APIBuilder;
 use webrtc::data_channel::data_channel_message::DataChannelMessage;
 use webrtc::data_channel::RTCDataChannel;
 use webrtc::ice_transport::ice_server::RTCIceServer;
 use webrtc::interceptor::registry::Registry;
+use webrtc::media::io::ogg_reader::OggReader;
+use webrtc::media::Sample;
 use webrtc::peer_connection::configuration::RTCConfiguration;
 use webrtc::peer_connection::sdp::session_description::RTCSessionDescription;
 use webrtc::peer_connection::RTCPeerConnection;
+use webrtc::rtp_transceiver::rtp_codec::RTCRtpCodecCapability;
+use webrtc::track::track_local::track_local_static_rtp::TrackLocalStaticRTP;
+use webrtc::track::track_local::track_local_static_sample::TrackLocalStaticSample;
+use webrtc::track::track_local::TrackLocal;
+use webrtc::track::track_local::TrackLocalWriter;
 
 pub struct SteckerWebRTCConnection {
     peer_connection: RTCPeerConnection,
@@ -45,7 +57,6 @@ impl SteckerWebRTCConnection {
         Ok(Self {
             peer_connection: api.new_peer_connection(config).await?,
             data_channel_map: Arc::new(Mutex::new(DataChannelMap(Mutex::new(HashMap::new())))),
-            // float_data_channel_map: DataChannelMap(Mutex::new(HashMap::new())),
         })
     }
 
@@ -185,7 +196,7 @@ impl SteckerWebRTCConnection {
     ///
     /// Remember to call start_listening_for_data_channel to start listening
     /// for channels from the other side.
-    pub fn register_channel(&self, room_type: &RoomType) -> Arc<SteckerDataChannel> {
+    pub fn register_channel(&self, room_type: &DataRoomType) -> Arc<SteckerDataChannel> {
         let stecker_channel = Arc::new(SteckerDataChannel::create_channels(
             SteckerDataChannelType::from(room_type.clone()),
         ));
@@ -221,7 +232,7 @@ impl SteckerWebRTCConnection {
     // we build data channel, other party has to listen
     pub async fn create_data_channel(
         &self,
-        room_type: &RoomType,
+        room_type: &DataRoomType,
     ) -> anyhow::Result<SteckerDataChannel> {
         let stecker_channel =
             SteckerDataChannel::create_channels(SteckerDataChannelType::from(room_type.clone()));
@@ -239,5 +250,127 @@ impl SteckerWebRTCConnection {
         );
 
         Ok(stecker_channel)
+    }
+
+    pub async fn listen_for_audio_channel(&self) -> anyhow::Result<SteckerAudioChannel> {
+        let audio_channel = SteckerAudioChannel::create_channels();
+
+        let audio_channel_tx = audio_channel.audio_channel_tx.clone();
+        let close_tx = audio_channel.close.clone();
+
+        self.peer_connection.on_track(Box::new(move |track, _, _| {
+            println!("Received a track! :O");
+            // receive and forward any content via a local track
+            // this local track can then be passed to other connections
+            let audio_channel_tx2 = audio_channel_tx.clone();
+            let close_tx2 = close_tx.clone();
+
+            tokio::spawn(async move {
+                let local_track = Arc::new(TrackLocalStaticRTP::new(
+                    track.codec().capability,
+                    "audio".to_owned(),
+                    "stecker".to_owned(),
+                ));
+
+                let _ = audio_channel_tx2.send(Some(local_track.clone()));
+
+                // the actual forwarding
+                // @todo improve error handling
+                while let Ok((rtp, _)) = track.read_rtp().await {
+                    let _ = local_track.write_rtp(&rtp).await;
+                }
+
+                println!("Nothing to transmit anymore?:O");
+                let _ = close_tx2.send(());
+            });
+            Box::pin(async {})
+        }));
+
+        Ok(audio_channel)
+    }
+
+    pub async fn add_existing_audio_track(&self, track: Arc<TrackLocalStaticRTP>) -> () {
+        let _ = self.peer_connection.add_track(track).await;
+        // maybe add this one as well
+        // https://github.com/webrtc-rs/webrtc/blob/62f2550799efe2dd36cdc950ad3f334b120c75bb/examples/examples/broadcast/broadcast.rs#L258-L265
+    }
+
+    pub async fn playback_audio_file(&self) -> anyhow::Result<()> {
+        let audio_track = Arc::new(TrackLocalStaticSample::new(
+            RTCRtpCodecCapability {
+                mime_type: MIME_TYPE_OPUS.to_owned(),
+                ..Default::default()
+            },
+            "audio".to_owned(),
+            "stecker".to_owned(),
+        ));
+        // the example adds the track differently? See
+        // https://github.com/webrtc-rs/webrtc/blob/62f2550799efe2dd36cdc950ad3f334b120c75bb/examples/examples/play-from-disk-h264/play-from-disk-h264.rs#L234
+        // let rtp_sender = self.peer_connection.add_track(audio_track.clone()).await?;
+        let rtp_sender = self
+            .peer_connection
+            .add_track(Arc::clone(&audio_track) as Arc<dyn TrackLocal + Send + Sync>)
+            .await?;
+
+        let audio_file_name = "/Users/scheiba/github/stecker/output.ogg".to_owned();
+        tokio::spawn(async move {
+            println!("Start something now!");
+            // Open a IVF file and start reading using our IVFReader
+            let file = File::open(audio_file_name)?;
+            let reader = BufReader::new(file);
+            // Open on oggfile in non-checksum mode.
+            let (mut ogg, _) = OggReader::new(reader, true)?;
+
+            // Wait for connection established
+            // notify_audio.notified().await;
+
+            let _ = sleep(Duration::from_secs(10)).await;
+
+            // Read incoming RTCP packets
+            // Before these packets are returned they are processed by interceptors. For things
+            // like NACK this needs to be called.
+            // the example calls this but it is not actually necessary?
+
+            // tokio::spawn(async move {
+            //     println!("Send some RTCP bullshit");
+            //     let mut rtcp_buf = vec![0u8; 1500];
+            //     while let Ok((_, _)) = rtp_sender.read(&mut rtcp_buf).await {}
+            //     anyhow::Result::<()>::Ok(())
+            // });
+
+            println!("play audio from disk file output.ogg");
+
+            // It is important to use a time.Ticker instead of time.Sleep because
+            // * avoids accumulating skew, just calling time.Sleep didn't compensate for the time spent parsing the data
+            // * works around latency issues with Sleep
+            let mut ticker = tokio::time::interval(Duration::from_millis(20));
+
+            // Keep track of last granule, the difference is the amount of samples in the buffer
+            let mut last_granule: u64 = 0;
+            while let Ok((page_data, page_header)) = ogg.parse_next_page() {
+                // The amount of samples is the difference between the last and current timestamp
+                let sample_count = page_header.granule_position - last_granule;
+                last_granule = page_header.granule_position;
+                let sample_duration = Duration::from_millis(sample_count * 1000 / 48000);
+
+                audio_track
+                    .write_sample(&Sample {
+                        data: page_data.freeze(),
+                        duration: sample_duration,
+                        ..Default::default()
+                    })
+                    .await?;
+
+                let _ = ticker.tick().await;
+            }
+
+            println!("Finished playback");
+
+            anyhow::Result::<()>::Ok(())
+        });
+
+        println!("Hey");
+
+        Ok(())
     }
 }

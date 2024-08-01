@@ -6,7 +6,7 @@ use clap::{Parser, Subcommand};
 use models::ClientRoomType;
 use shared::api::APIClient;
 use shared::connections::SteckerWebRTCConnection;
-use shared::models::{PublicRoomType, RoomType, SteckerData};
+use shared::models::{DataRoomType, PublicRoomType, SteckerData};
 
 const LOCAL_HOST: &str = "http://127.0.0.1:8000";
 
@@ -99,9 +99,9 @@ async fn create_room(
     let connection = SteckerWebRTCConnection::build_connection().await?;
 
     let public_room_type = PublicRoomType::from(client_room_type.clone());
-    let room_type = RoomType::from(client_room_type.clone());
+    let room_type = DataRoomType::from(client_room_type.clone());
 
-    let meta_data_channel = connection.create_data_channel(&RoomType::Meta).await?;
+    let meta_data_channel = connection.create_data_channel(&DataRoomType::Meta).await?;
     let mut meta_msg_receiver = meta_data_channel.inbound.subscribe();
 
     let data_channel = connection.create_data_channel(&room_type).await?;
@@ -161,12 +161,12 @@ async fn join_room(
     client_room_type: &ClientRoomType,
 ) -> anyhow::Result<()> {
     let public_room_type = PublicRoomType::from(client_room_type.clone());
-    let room_type = RoomType::from(client_room_type.clone());
+    let room_type = DataRoomType::from(client_room_type.clone());
 
     let connection = SteckerWebRTCConnection::build_connection().await?;
 
     let stecker_data_channel = connection.create_data_channel(&room_type).await?;
-    let stecker_meta_channel = connection.create_data_channel(&RoomType::Meta).await?;
+    let stecker_meta_channel = connection.create_data_channel(&DataRoomType::Meta).await?;
 
     let offer = connection.create_offer().await?;
 
