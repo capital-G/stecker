@@ -5,13 +5,14 @@ use opus::{Channels, Encoder};
 use ringbuf::traits::{Consumer, Producer, Split};
 use ringbuf::wrap::caching::Caching;
 use ringbuf::{HeapCons, HeapProd, HeapRb, SharedRb};
+use shared::models::SteckerAPIRoomType;
 use tokio::runtime::Runtime;
 use tokio::sync::broadcast::{self, Receiver, Sender};
 
 use shared::{
     api::APIClient,
     connections::SteckerWebRTCConnection,
-    models::{DataRoomType, SteckerData},
+    models::{DataRoomInternalType, SteckerData},
 };
 
 pub struct Room {
@@ -40,11 +41,11 @@ impl Room {
             rt.block_on(async {
                 let connection = SteckerWebRTCConnection::build_connection().await.unwrap();
                 let stecker_data_channel = connection
-                    .create_data_channel(&DataRoomType::Float)
+                    .create_data_channel(&DataRoomInternalType::Float)
                     .await
                     .unwrap();
                 let meta_data_channel = connection
-                    .create_data_channel(&DataRoomType::Meta)
+                    .create_data_channel(&DataRoomInternalType::Meta)
                     .await
                     .unwrap();
                 let offer = connection.create_offer().await.unwrap();
@@ -52,7 +53,11 @@ impl Room {
                 let api_client = APIClient { host: host2 };
 
                 match api_client
-                    .join_room(&name2, &shared::models::PublicRoomType::Float, &offer)
+                    .join_room(
+                        &name2,
+                        &SteckerAPIRoomType::Data(shared::models::DataRoomPublicType::Float),
+                        &offer,
+                    )
                     .await
                 {
                     Ok(answer) => {
@@ -126,7 +131,7 @@ impl Room {
             rt.block_on(async {
                 let connection = SteckerWebRTCConnection::build_connection().await?;
                 let stecker_data_channel = connection
-                    .create_data_channel(&DataRoomType::Float)
+                    .create_data_channel(&DataRoomInternalType::Float)
                     .await?;
                 let offer = connection.create_offer().await?;
 
@@ -158,7 +163,7 @@ impl Room {
 
                 let api_client = APIClient { host: host2 };
 
-                match api_client.create_room(&name2, &shared::models::PublicRoomType::Float, &offer).await {
+                match api_client.create_room(&name2, &shared::models::SteckerAPIRoomType::Data(shared::models::DataRoomPublicType::Float), &offer).await {
                     Ok(answer) => {
                         connection.set_remote_description(answer).await?;
 

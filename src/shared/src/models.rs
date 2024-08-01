@@ -11,9 +11,9 @@ use webrtc::{
     track::track_local::track_local_static_rtp::TrackLocalStaticRTP,
 };
 
-/// the possible kinds of data rooms
+/// the possible kinds of data rooms used
 #[derive(Copy, Clone, Eq, PartialEq)]
-pub enum DataRoomType {
+pub enum DataRoomInternalType {
     Float,
     Chat,
     Meta,
@@ -23,7 +23,7 @@ pub enum DataRoomType {
 /// that are usable for the public
 /// via the server.
 #[derive(Copy, Clone)]
-pub enum PublicRoomType {
+pub enum DataRoomPublicType {
     Float,
     Chat,
 }
@@ -36,31 +36,36 @@ pub(crate) enum SteckerDataChannelType {
     String,
 }
 
-impl From<DataRoomType> for SteckerDataChannelType {
-    fn from(value: DataRoomType) -> Self {
+pub enum SteckerAPIRoomType {
+    Audio,
+    Data(DataRoomPublicType),
+}
+
+impl From<DataRoomInternalType> for SteckerDataChannelType {
+    fn from(value: DataRoomInternalType) -> Self {
         match value {
-            DataRoomType::Float => SteckerDataChannelType::Float,
-            DataRoomType::Chat => SteckerDataChannelType::String,
-            DataRoomType::Meta => SteckerDataChannelType::String,
+            DataRoomInternalType::Float => SteckerDataChannelType::Float,
+            DataRoomInternalType::Chat => SteckerDataChannelType::String,
+            DataRoomInternalType::Meta => SteckerDataChannelType::String,
         }
     }
 }
 
-impl Into<DataRoomType> for PublicRoomType {
-    fn into(self) -> DataRoomType {
+impl Into<DataRoomInternalType> for DataRoomPublicType {
+    fn into(self) -> DataRoomInternalType {
         match self {
-            PublicRoomType::Float => DataRoomType::Float,
-            PublicRoomType::Chat => DataRoomType::Chat,
+            DataRoomPublicType::Float => DataRoomInternalType::Float,
+            DataRoomPublicType::Chat => DataRoomInternalType::Chat,
         }
     }
 }
 
-impl Display for DataRoomType {
+impl Display for DataRoomInternalType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match &self {
-            DataRoomType::Float => write!(f, "FloatRoom"),
-            DataRoomType::Chat => write!(f, "ChatRoom"),
-            DataRoomType::Meta => write!(f, "Meta"),
+            DataRoomInternalType::Float => write!(f, "FloatRoom"),
+            DataRoomInternalType::Chat => write!(f, "ChatRoom"),
+            DataRoomInternalType::Meta => write!(f, "Meta"),
         }
     }
 }
@@ -135,12 +140,12 @@ impl Display for SteckerData {
 
 pub type ChannelName = String;
 
-impl From<&DataRoomType> for ChannelName {
-    fn from(value: &DataRoomType) -> Self {
+impl From<&DataRoomInternalType> for ChannelName {
+    fn from(value: &DataRoomInternalType) -> Self {
         match value {
-            DataRoomType::Float => "float".to_string(),
-            DataRoomType::Chat => "chat".to_string(),
-            DataRoomType::Meta => "meta".to_string(),
+            DataRoomInternalType::Float => "float".to_string(),
+            DataRoomInternalType::Chat => "chat".to_string(),
+            DataRoomInternalType::Meta => "meta".to_string(),
         }
     }
 }

@@ -1,5 +1,5 @@
 use crate::models::{
-    ChannelName, DataChannelMap, DataRoomType, SteckerAudioChannel, SteckerData,
+    ChannelName, DataChannelMap, DataRoomInternalType, SteckerAudioChannel, SteckerData,
     SteckerDataChannel, SteckerDataChannelType,
 };
 use crate::utils::{decode_b64, encode_offer};
@@ -196,7 +196,7 @@ impl SteckerWebRTCConnection {
     ///
     /// Remember to call start_listening_for_data_channel to start listening
     /// for channels from the other side.
-    pub fn register_channel(&self, room_type: &DataRoomType) -> Arc<SteckerDataChannel> {
+    pub fn register_channel(&self, room_type: &DataRoomInternalType) -> Arc<SteckerDataChannel> {
         let stecker_channel = Arc::new(SteckerDataChannel::create_channels(
             SteckerDataChannelType::from(room_type.clone()),
         ));
@@ -232,7 +232,7 @@ impl SteckerWebRTCConnection {
     // we build data channel, other party has to listen
     pub async fn create_data_channel(
         &self,
-        room_type: &DataRoomType,
+        room_type: &DataRoomInternalType,
     ) -> anyhow::Result<SteckerDataChannel> {
         let stecker_channel =
             SteckerDataChannel::create_channels(SteckerDataChannelType::from(room_type.clone()));

@@ -6,7 +6,7 @@ use clap::{Parser, Subcommand};
 use models::ClientRoomType;
 use shared::api::APIClient;
 use shared::connections::SteckerWebRTCConnection;
-use shared::models::{DataRoomType, PublicRoomType, SteckerData};
+use shared::models::{DataRoomInternalType, SteckerData};
 
 const LOCAL_HOST: &str = "http://127.0.0.1:8000";
 
@@ -98,10 +98,11 @@ async fn create_room(
 ) -> anyhow::Result<()> {
     let connection = SteckerWebRTCConnection::build_connection().await?;
 
-    let public_room_type = PublicRoomType::from(client_room_type.clone());
-    let room_type = DataRoomType::from(client_room_type.clone());
+    let room_type = DataRoomInternalType::from(client_room_type.clone());
 
-    let meta_data_channel = connection.create_data_channel(&DataRoomType::Meta).await?;
+    let meta_data_channel = connection
+        .create_data_channel(&DataRoomInternalType::Meta)
+        .await?;
     let mut meta_msg_receiver = meta_data_channel.inbound.subscribe();
 
     let data_channel = connection.create_data_channel(&room_type).await?;
@@ -114,7 +115,7 @@ async fn create_room(
     let offer = connection.create_offer().await?;
 
     match api_client
-        .create_room(name, &public_room_type, &offer)
+        .create_room(name, &client_room_type.into(), &offer)
         .await
     {
         Ok(answer) => {
@@ -160,13 +161,14 @@ async fn join_room(
     host: &str,
     client_room_type: &ClientRoomType,
 ) -> anyhow::Result<()> {
-    let public_room_type = PublicRoomType::from(client_room_type.clone());
-    let room_type = DataRoomType::from(client_room_type.clone());
+    let room_type = DataRoomInternalType::from(client_room_type.clone());
 
     let connection = SteckerWebRTCConnection::build_connection().await?;
 
     let stecker_data_channel = connection.create_data_channel(&room_type).await?;
-    let stecker_meta_channel = connection.create_data_channel(&DataRoomType::Meta).await?;
+    let stecker_meta_channel = connection
+        .create_data_channel(&DataRoomInternalType::Meta)
+        .await?;
 
     let offer = connection.create_offer().await?;
 
@@ -174,7 +176,10 @@ async fn join_room(
         host: host.to_string(),
     };
 
-    match api_client.join_room(name, &public_room_type, &offer).await {
+    match api_client
+        .join_room(name, &(client_room_type.clone().into()), &offer)
+        .await
+    {
         Ok(answer) => {
             // Apply the answer as the remote description
             connection.set_remote_description(answer).await?;

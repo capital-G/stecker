@@ -1,5 +1,5 @@
 use clap::ValueEnum;
-use shared::models::{DataRoomType, PublicRoomType};
+use shared::models::{DataRoomInternalType, DataRoomPublicType, SteckerAPIRoomType};
 
 #[derive(ValueEnum, Clone)]
 pub enum ClientRoomType {
@@ -7,20 +7,29 @@ pub enum ClientRoomType {
     Float,
 }
 
-impl From<ClientRoomType> for PublicRoomType {
+impl From<ClientRoomType> for DataRoomPublicType {
     fn from(value: ClientRoomType) -> Self {
         match value {
-            ClientRoomType::Chat => PublicRoomType::Chat,
-            ClientRoomType::Float => PublicRoomType::Float,
+            ClientRoomType::Chat => DataRoomPublicType::Chat,
+            ClientRoomType::Float => DataRoomPublicType::Float,
         }
     }
 }
 
-impl From<ClientRoomType> for DataRoomType {
+impl From<ClientRoomType> for DataRoomInternalType {
     fn from(value: ClientRoomType) -> Self {
         match value {
-            ClientRoomType::Chat => DataRoomType::Chat,
-            ClientRoomType::Float => DataRoomType::Float,
+            ClientRoomType::Chat => DataRoomInternalType::Chat,
+            ClientRoomType::Float => DataRoomInternalType::Float,
+        }
+    }
+}
+
+impl From<ClientRoomType> for SteckerAPIRoomType {
+    fn from(value: ClientRoomType) -> Self {
+        match value {
+            ClientRoomType::Chat => SteckerAPIRoomType::Data(DataRoomPublicType::Chat),
+            ClientRoomType::Float => SteckerAPIRoomType::Data(DataRoomPublicType::Float),
         }
     }
 }

@@ -4,7 +4,7 @@ use std::time::Duration;
 use async_graphql::{Enum, SimpleObject};
 use shared::{
     connections::SteckerWebRTCConnection,
-    models::{DataRoomType, SteckerAudioChannel, SteckerData},
+    models::{DataRoomInternalType, SteckerAudioChannel, SteckerData},
 };
 use tokio::sync::broadcast::Sender;
 use uuid::Uuid;
@@ -55,7 +55,7 @@ struct BroadcastRoomMeta {
     _num_listeners_receiver: tokio::sync::watch::Receiver<i64>,
 }
 
-impl From<RoomType> for DataRoomType {
+impl From<RoomType> for DataRoomInternalType {
     fn from(value: RoomType) -> Self {
         match value {
             RoomType::Float => Self::Float,
@@ -84,7 +84,7 @@ pub struct DataBroadcastRoom {
     /// Subscribe to this to receive messages from room
     /// potentially not useful to send to this (unless you also become a broadcaster)
     pub broadcast: Sender<SteckerData>,
-    pub room_type: DataRoomType,
+    pub room_type: DataRoomInternalType,
 }
 
 type ResponseOffer = String;
@@ -98,13 +98,13 @@ impl DataBroadcastRoom {
     pub async fn create_room(
         name: String,
         offer: String,
-        room_type: DataRoomType,
+        room_type: DataRoomInternalType,
     ) -> anyhow::Result<BroadcastRoomWithOffer> {
         let connection = SteckerWebRTCConnection::build_connection().await?;
         let response_offer = connection.respond_to_offer(offer).await?;
 
         let stecker_data_channel = connection.register_channel(&room_type);
-        let meta_channel = connection.register_channel(&DataRoomType::Meta);
+        let meta_channel = connection.register_channel(&DataRoomInternalType::Meta);
 
         connection.start_listening_for_data_channel().await;
 
@@ -170,7 +170,7 @@ impl DataBroadcastRoom {
         let connection = SteckerWebRTCConnection::build_connection().await?;
         let response_offer = connection.respond_to_offer(offer.to_string()).await?;
 
-        let meta_channel = connection.register_channel(&DataRoomType::Meta);
+        let meta_channel = connection.register_channel(&DataRoomInternalType::Meta);
         let stecker_data_channel = connection.register_channel(&self.room_type.into());
         connection.start_listening_for_data_channel().await;
 
@@ -284,7 +284,7 @@ impl AudioBroadcastRoom {
     ) -> anyhow::Result<AudioBroadcastRoomWithOffer> {
         let connection = SteckerWebRTCConnection::build_connection().await?;
         let audio_channel = connection.listen_for_audio_channel().await?;
-        let meta_channel = connection.register_channel(&DataRoomType::Meta);
+        let meta_channel = connection.register_channel(&DataRoomInternalType::Meta);
         let (num_listeners_sender, num_listeners_receiver) = tokio::sync::watch::channel(0);
 
         let response_offer = connection.respond_to_offer(offer).await?;
@@ -307,7 +307,7 @@ impl AudioBroadcastRoom {
 
     pub async fn join_room(&self, offer: &str) -> anyhow::Result<ResponseOffer> {
         let connection = SteckerWebRTCConnection::build_connection().await?;
-        let meta_channel = connection.register_channel(&DataRoomType::Meta);
+        let meta_channel = connection.register_channel(&DataRoomInternalType::Meta);
 
         let timeout = tokio::time::sleep(Duration::from_secs(10));
         let audio_track_receiver = self
@@ -344,13 +344,13 @@ impl AudioBroadcastRoom {
     // }
 }
 
-impl Into<RoomType> for DataRoomType {
+impl Into<RoomType> for DataRoomInternalType {
     fn into(self) -> RoomType {
         match self {
-            DataRoomType::Float => RoomType::Float,
-            DataRoomType::Chat => RoomType::Chat,
+            DataRoomInternalType::Float => RoomType::Float,
+            DataRoomInternalType::Chat => RoomType::Chat,
             // @todo meta rooms do not exist exposed to the graphql api
-            DataRoomType::Meta => !unimplemented!(),
+            DataRoomInternalType::Meta => !unimplemented!(),
         }
     }
 }

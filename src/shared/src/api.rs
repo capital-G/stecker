@@ -1,4 +1,7 @@
-use crate::{models::PublicRoomType, utils::decode_b64};
+use crate::{
+    models::{DataRoomPublicType, SteckerAPIRoomType},
+    utils::decode_b64,
+};
 use anyhow::bail;
 use reqwest::StatusCode;
 use serde::Deserialize;
@@ -27,11 +30,14 @@ pub struct APIClient {
 }
 
 // @todo make this static?
-impl Into<String> for &PublicRoomType {
+impl Into<String> for &SteckerAPIRoomType {
     fn into(self) -> String {
         match self {
-            PublicRoomType::Float => "FLOAT".to_string(),
-            PublicRoomType::Chat => "CHAT".to_string(),
+            SteckerAPIRoomType::Audio => "AUDIO".to_owned(),
+            SteckerAPIRoomType::Data(data_channel) => match data_channel {
+                DataRoomPublicType::Float => "FLOAT".to_owned(),
+                DataRoomPublicType::Chat => "CHAT".to_owned(),
+            },
         }
     }
 }
@@ -40,7 +46,7 @@ impl APIClient {
     pub async fn create_room(
         &self,
         name: &str,
-        room_type: &PublicRoomType,
+        room_type: &SteckerAPIRoomType,
         local_session_description: &str,
     ) -> anyhow::Result<RTCSessionDescription> {
         let room_string: String = room_type.into();
@@ -78,7 +84,7 @@ impl APIClient {
     pub async fn join_room(
         &self,
         name: &str,
-        room_type: &PublicRoomType,
+        room_type: &SteckerAPIRoomType,
         local_session_description: &str,
     ) -> anyhow::Result<RTCSessionDescription> {
         let room_string: String = room_type.into();
