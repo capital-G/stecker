@@ -2526,6 +2526,7 @@ dependencies = [
  "ringbuf",
  "shared",
  "tokio",
+ "webrtc",
 ]
 
 [[package]]

@@ -252,6 +252,21 @@ impl SteckerWebRTCConnection {
         Ok(stecker_channel)
     }
 
+    pub async fn create_audio_channel(&self) -> anyhow::Result<Arc<TrackLocalStaticSample>> {
+        let audio_track = Arc::new(TrackLocalStaticSample::new(
+            RTCRtpCodecCapability {
+                mime_type: MIME_TYPE_OPUS.to_owned(),
+                ..Default::default()
+            },
+            "audio".to_owned(),
+            "stecker".to_owned(),
+        ));
+
+        let _ = self.peer_connection.add_track(audio_track.clone()).await?;
+
+        Ok(audio_track)
+    }
+
     pub async fn listen_for_audio_channel(&self) -> anyhow::Result<SteckerAudioChannel> {
         let audio_channel = SteckerAudioChannel::create_channels();
 
