@@ -230,7 +230,7 @@ impl AudioRoomSender {
 
         // @todo make this configurable?
         // 20 ms
-        const FRAME_SIZE: usize = 2400;
+        const FRAME_SIZE: usize = 2880;
         // this needs to be
         let sample_rate: u32 = 48000;
 
@@ -281,11 +281,10 @@ impl AudioRoomSender {
                         OpusChannels::Mono,
                         opus::Application::Audio
                     ).expect("Could not init the opus encoder :O");
-
                     // let mut opus_buffer = vec![0; FRAME_SIZE];
                     let mut raw_signal_buffer = [0.0f32; FRAME_SIZE];
-                    // this is too big?!
-                    let mut buf = BytesMut::with_capacity(1000 * 128 *4);
+                    // TODO: too large values here will crash (this is 512Byte)
+                    let mut buf = [0; 512];
                     // @todo this needs to be calculated based on the framerate (CONST) and frame size
                     let mut ticker = tokio::time::interval(Duration::from_millis(50));
                     loop {
