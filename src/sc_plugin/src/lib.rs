@@ -224,8 +224,9 @@ pub struct AudioRoomSender {
 
 impl AudioRoomSender {
     pub fn create_room(name: &str, host: &str) -> Self {
-        let name2 = String::from_str(name).unwrap();
-        let host2 = String::from_str(host).unwrap();
+        // @todo hardcoded b/c audio rate transfer works differently
+        let name2 = "hello".to_owned();
+        let host2 = "http://127.0.0.1:8000".to_owned();
 
         // @todo make this configurable?
         // 20 ms
@@ -251,6 +252,8 @@ impl AudioRoomSender {
                 let meta_channel = connection.create_data_channel(&DataRoomInternalType::Meta).await?;
                 let mut meta_recv = meta_channel.inbound.subscribe();
                 let offer = connection.create_offer().await?;
+
+                println!("Our base64 offer is: {offer}");
 
                 // consume meta messages
                 tokio::spawn(async move {
@@ -311,14 +314,14 @@ impl AudioRoomSender {
                 });
 
                 // @todo this should not be hardcoded
-                let api_client = APIClient { host: "http://127.0.0.1:8000/".to_owned() };
+                let api_client = APIClient { host: host2.to_string() };
 
-                match api_client.create_room(&name2, &shared::models::SteckerAPIRoomType::Audio, &offer).await {
+                match api_client.create_room("sc-hello", &shared::models::SteckerAPIRoomType::Audio, &offer).await {
                     Ok(answer) => {
-                        connection.set_remote_description(answer).await?;
+                        let _ = connection.set_remote_description(answer).await.expect("Could not set remote description!");
 
                         // // @todo wait for actual stop signal here
-                        // let _ = sc_close_receiver.recv().await;
+                        let _ = sc_close_receiver.recv().await;
 
                         // println!("Close connection now");
                         // connection.close().await?;
