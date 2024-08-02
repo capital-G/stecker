@@ -117,10 +117,10 @@ namespace SuperStecker
         // Output buffer
         float* outbuf = out(0);
 
-        std::vector<float> array(outbuf, outbuf + (nSamples * sizeof(float)));
-        rust::Slice<const float> slice{array.data(), array.size()};
+        // std::vector<float> array(outbuf, nSamples);
+        // rust::Slice<const float> slice{array.data(), array.size()};
 
-        push_values_to_web(**m_audio_room, slice);
+        push_values_to_web(**m_audio_room, outbuf, nSamples);
 
         // simple gain function
         for (int i = 0; i < nSamples; ++i) {

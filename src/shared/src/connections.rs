@@ -256,6 +256,8 @@ impl SteckerWebRTCConnection {
         let audio_track = Arc::new(TrackLocalStaticSample::new(
             RTCRtpCodecCapability {
                 mime_type: MIME_TYPE_OPUS.to_owned(),
+                clock_rate: 48000,
+                channels: 1,
                 ..Default::default()
             },
             "audio".to_owned(),

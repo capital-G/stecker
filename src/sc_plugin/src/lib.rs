@@ -230,7 +230,7 @@ impl AudioRoomSender {
 
         // @todo make this configurable?
         // 20 ms
-        const FRAME_SIZE: usize = 2880;
+        const FRAME_SIZE: usize = 960;
         // this needs to be
         let sample_rate: u32 = 48000;
 
@@ -281,12 +281,14 @@ impl AudioRoomSender {
                         OpusChannels::Mono,
                         opus::Application::Audio
                     ).expect("Could not init the opus encoder :O");
+                    let _ = opus_encoder.set_bitrate(opus::Bitrate::Bits(96000));
+                    // let _ = opus_encoder.set_vbr(true);
                     // let mut opus_buffer = vec![0; FRAME_SIZE];
                     let mut raw_signal_buffer = [0.0f32; FRAME_SIZE];
                     // TODO: too large values here will crash (this is 512Byte)
-                    let mut buf = [0; 512];
+                    let mut buf = [0; 4096];
                     // @todo this needs to be calculated based on the framerate (CONST) and frame size
-                    let mut ticker = tokio::time::interval(Duration::from_millis(50));
+                    let mut ticker = tokio::time::interval(Duration::from_millis(20));
                     loop {
                         let _ = ticker.tick().await;
                         if consumer.observe().occupied_len() >= FRAME_SIZE {
@@ -296,6 +298,7 @@ impl AudioRoomSender {
                                 Ok(packet_size) => {
                                     let result = audio_track.write_sample(&Sample {
                                         data: Bytes::copy_from_slice(&buf[0..packet_size]),
+                                        duration: Duration::from_millis(20),
                                         ..Default::default()
                                     }).await;
                                     if let Err(err) = result {
@@ -372,8 +375,10 @@ fn create_audio_room_sender(name: &str, host: &str) -> Box<AudioRoomSender> {
     Box::new(AudioRoomSender::create_room(name, host))
 }
 
-fn push_values_to_web(audio_room: &mut AudioRoomSender, values: &[f32]) {
-    let _ = audio_room.push_values_to_web(values);
+unsafe fn push_values_to_web(audio_room: &mut AudioRoomSender, values: *mut f32, num_samples: i32) {
+    let slice = unsafe { std::slice::from_raw_parts_mut(values, num_samples.try_into().unwrap()) };
+    // println!("Got some values? {} {}", slice[], num_samples);
+    let _ = audio_room.push_values_to_web(slice);
 }
 
 #[cxx::bridge]
@@ -388,6 +393,10 @@ mod ffi {
 
         type AudioRoomSender;
         fn create_audio_room_sender(name: &str, host: &str) -> Box<AudioRoomSender>;
-        fn push_values_to_web(audio_room: &mut AudioRoomSender, values: &[f32]);
+        unsafe fn push_values_to_web(
+            audio_room: &mut AudioRoomSender,
+            values: *mut f32,
+            num_samples: i32,
+        );
     }
 }
