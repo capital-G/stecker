@@ -2,10 +2,10 @@ use std::str::FromStr;
 use std::thread;
 use std::time::Duration;
 
+use bytes::{Bytes, BytesMut};
 use opus::{Channels as OpusChannels, Encoder as OpusEncoder};
 use ringbuf::traits::{Consumer, Observer, Producer, Split};
-use ringbuf::wrap::caching::Caching;
-use ringbuf::{HeapCons, HeapProd, HeapRb, SharedRb};
+use ringbuf::{HeapProd, HeapRb};
 use shared::models::SteckerAPIRoomType;
 use tokio::runtime::Runtime;
 use tokio::sync::broadcast::{self, Receiver, Sender};
@@ -17,7 +17,7 @@ use shared::{
 };
 use webrtc::media::Sample;
 
-pub struct Room {
+pub struct DataRoom {
     name: String,
     receiver: Receiver<f32>,
     sender: Sender<f32>,
@@ -27,7 +27,7 @@ pub struct Room {
     last_value: f32,
 }
 
-impl Room {
+impl DataRoom {
     pub fn join_room(name: &str, host: &str) -> Self {
         let name2 = String::from_str(name).unwrap();
         let host2 = String::from_str(host).unwrap();
@@ -106,7 +106,7 @@ impl Room {
             });
         });
 
-        let room = Room {
+        let room = Self {
             name: name.to_string(),
             receiver: sender2.subscribe(),
             sender: sender2,
@@ -179,7 +179,7 @@ impl Room {
             })
         });
 
-        let room = Room {
+        let room = Self {
             name: name.to_string(),
             receiver: receiver2,
             sender: sender2,
@@ -219,39 +219,23 @@ impl Room {
 pub struct AudioRoomSender {
     name: String,
     close_sender: Sender<()>,
-    // consumer: HeapCons<f32>,
     producer: HeapProd<f32>,
 }
 
 impl AudioRoomSender {
-    // pub fn create_room(name: &str, host: &str) -> Self {
-    //     // @todo ring buffer needs to have size of at least of ?
-    //     let ring_buffer = HeapRb::<f32>::new(48000);
-
-    //     let (producer, consumer) = ring_buffer.split();
-    //     let (close_tx, _) = broadcast::channel::<()>(2);
-
-    //     Self {
-    //         name: name.to_owned(),
-    //         close_sender: close_tx,
-    //         producer,
-    //         consumer,
-    //     }
-    // }
-
     pub fn create_room(name: &str, host: &str) -> Self {
         let name2 = String::from_str(name).unwrap();
         let host2 = String::from_str(host).unwrap();
 
         // @todo make this configurable?
         // 20 ms
-        let frame_size: usize = 2400;
+        const FRAME_SIZE: usize = 2400;
         // this needs to be
         let sample_rate: u32 = 48000;
 
         // @todo calculate the exapct size
         let ring_buffer = HeapRb::<f32>::new(48000);
-        let (producer, consumer) = ring_buffer.split();
+        let (producer, mut consumer) = ring_buffer.split();
 
         let (sender, mut receiver) = broadcast::channel::<f32>(1024);
         let sender2 = sender.clone();
@@ -289,46 +273,66 @@ impl AudioRoomSender {
 
                 // thread to push values to server
                 tokio::spawn(async move {
-                    let opus_encoder = OpusEncoder::new(
+                    let mut opus_encoder = OpusEncoder::new(
                         sample_rate.into(),
                         OpusChannels::Mono,
-                         opus::Application::Audio
+                        opus::Application::Audio
                     ).expect("Could not init the opus encoder :O");
 
-                    let mut audio_buffer = vec![0u8; frame_size];
+                    // let mut opus_buffer = vec![0; FRAME_SIZE];
+                    let mut raw_signal_buffer = [0.0f32; FRAME_SIZE];
+                    // this is too big?!
+                    let mut buf = BytesMut::with_capacity(1000 * 128 *4);
                     // @todo this needs to be calculated based on the framerate (CONST) and frame size
                     let mut ticker = tokio::time::interval(Duration::from_millis(50));
                     loop {
                         let _ = ticker.tick().await;
-                        if !consumer.is_empty() {
-                            // what to do here?
-                            let (foo, bar) = consumer.as_slices();
-                            opus_encoder.encode_float(foo, &mut audio_buffer);
-                            audio_track.write_sample(&Sample {
-                                data: audio_buffer,
-                                ..Default::default()
-                            });
+                        if consumer.observe().occupied_len() >= FRAME_SIZE {
+                            consumer.pop_slice(&mut raw_signal_buffer);
+                            let encoding_result = opus_encoder.encode_float(&raw_signal_buffer, &mut buf);
+                            match encoding_result {
+                                Ok(packet_size) => {
+                                    let result = audio_track.write_sample(&Sample {
+                                        data: Bytes::copy_from_slice(&buf[0..packet_size]),
+                                        ..Default::default()
+                                    }).await;
+                                    if let Err(err) = result {
+                                        println!("Failed to write opus sample to the track: {err}");
+                                    }
+                                },
+                                Err(err) => {
+                                    println!("Failed to encode to opus: {err}");
+                                },
+                            }
+                        } else {
+                            println!("Not enough values in ringbuf yet :O");
                         }
                     }
                 });
 
-                let api_client = APIClient { host: host2 };
+                // @todo this should not be hardcoded
+                let api_client = APIClient { host: "http://127.0.0.1:8000/".to_owned() };
 
-                match api_client.create_room(&name2, &shared::models::SteckerAPIRoomType::Data(shared::models::DataRoomPublicType::Float), &offer).await {
+                match api_client.create_room(&name2, &shared::models::SteckerAPIRoomType::Audio, &offer).await {
                     Ok(answer) => {
                         connection.set_remote_description(answer).await?;
 
-                        // @todo wait for actual stop signal here
-                        let _ = sc_close_receiver.recv().await;
+                        // // @todo wait for actual stop signal here
+                        // let _ = sc_close_receiver.recv().await;
 
-                        println!("Close connection now");
-                        connection.close().await?;
+                        // println!("Close connection now");
+                        // connection.close().await?;
                         Ok(())
                     }
-                    Err(err) => Err(err),
+                    Err(err) => {
+                        println!("Failed to create audio room on server: {err}");
+                        Err(err)
+                    },
                 }
             })
         });
+
+        println!("Created the audio sender :O");
 
         return AudioRoomSender {
             name: name.to_owned(),
@@ -337,39 +341,51 @@ impl AudioRoomSender {
         };
     }
 
-    pub fn push_values_to_web(&mut self, values: Vec<f32>) {
-        self.producer.push_iter(values.into_iter());
+    pub fn push_values_to_web(&mut self, values: &[f32]) {
+        self.producer.push_iter(values.into_iter().cloned());
     }
 }
 
-fn create_room(name: &str, host: &str) -> Box<Room> {
-    Box::new(Room::create_room(name, host))
+fn create_data_room(name: &str, host: &str) -> Box<DataRoom> {
+    Box::new(DataRoom::create_room(name, host))
 }
 
-fn join_room(name: &str, host: &str) -> Box<Room> {
-    Box::new(Room::join_room(name, host))
+fn join_data_room(name: &str, host: &str) -> Box<DataRoom> {
+    Box::new(DataRoom::join_room(name, host))
 }
 
-fn recv_message(room: &mut Room) -> f32 {
-    room.recv_message()
+fn recv_data_message(data_room: &mut DataRoom) -> f32 {
+    data_room.recv_message()
 }
 
-fn send_message(room: &mut Room, value: f32) -> f32 {
-    room.send_message(value)
+fn send_data_message(data_room: &mut DataRoom, value: f32) -> f32 {
+    data_room.send_message(value)
 }
 
-fn send_close_signal(room: &mut Room) {
-    let _ = room.close_sender.send(());
+fn send_data_close_signal(data_room: &mut DataRoom) {
+    let _ = data_room.close_sender.send(());
+}
+
+fn create_audio_room_sender(name: &str, host: &str) -> Box<AudioRoomSender> {
+    Box::new(AudioRoomSender::create_room(name, host))
+}
+
+fn push_values_to_web(audio_room: &mut AudioRoomSender, values: &[f32]) {
+    let _ = audio_room.push_values_to_web(values);
 }
 
 #[cxx::bridge]
 mod ffi {
     extern "Rust" {
-        type Room;
-        fn create_room(name: &str, host: &str) -> Box<Room>;
-        fn join_room(name: &str, host: &str) -> Box<Room>;
-        fn recv_message(room: &mut Room) -> f32;
-        fn send_message(room: &mut Room, value: f32) -> f32;
-        fn send_close_signal(room: &mut Room);
+        type DataRoom;
+        fn create_data_room(name: &str, host: &str) -> Box<DataRoom>;
+        fn join_data_room(name: &str, host: &str) -> Box<DataRoom>;
+        fn recv_data_message(room: &mut DataRoom) -> f32;
+        fn send_data_message(room: &mut DataRoom, value: f32) -> f32;
+        fn send_data_close_signal(room: &mut DataRoom);
+
+        type AudioRoomSender;
+        fn create_audio_room_sender(name: &str, host: &str) -> Box<AudioRoomSender>;
+        fn push_values_to_web(audio_room: &mut AudioRoomSender, values: &[f32]);
     }
 }

@@ -11,6 +11,7 @@ openssl = { version = "0.10", features = ["vendored"] }
 opus = "0.3.0"
 ringbuf = "0.4.1"
 webrtc = "0.10.1"
+bytes = "1.7.1"
 
 [build-dependencies]
 cxx-build = "1.0"

@@ -29,8 +29,8 @@ namespace SuperStecker
         return rust::Str(buff, strSize);
     }
 
-    SuperStecker::~SuperStecker() {
-        send_close_signal(**m_room);
+    DataStecker::~DataStecker() {
+        send_data_close_signal(**m_data_room);
     }
 
     /*
@@ -39,14 +39,14 @@ namespace SuperStecker
 
     */
 
-    SuperSteckerIn::SuperSteckerIn() {
-        mCalcFunc = make_calc_function<SuperSteckerIn, &SuperSteckerIn::next_k>();
+    DataSteckerIn::DataSteckerIn() {
+        mCalcFunc = make_calc_function<DataSteckerIn, &DataSteckerIn::next_k>();
 
         rust::Str roomName = extractString(0, 2);
         rust::Str hostName = extractString(1, 2 + (int) in0(0));
 
         // smart ptr allows us to delay the initialization of room
-        m_room = std::make_unique<rust::Box<Room>>(join_room(
+        m_data_room = std::make_unique<rust::Box<DataRoom>>(join_data_room(
             roomName,
             hostName
         ));
@@ -54,8 +54,8 @@ namespace SuperStecker
         next_k(1);
     }
 
-    void SuperSteckerIn::next_k(int nSamples) {
-        float msg = recv_message(**m_room);
+    void DataSteckerIn::next_k(int nSamples) {
+        float msg = recv_data_message(**m_data_room);
         out0(0) = msg;
     }
 
@@ -65,14 +65,14 @@ namespace SuperStecker
 
     */
 
-    SuperSteckerOut::SuperSteckerOut() {
-        mCalcFunc = make_calc_function<SuperSteckerOut, &SuperSteckerOut::next_k>();
+    DataSteckerOut::DataSteckerOut() {
+        mCalcFunc = make_calc_function<DataSteckerOut, &DataSteckerOut::next_k>();
 
         rust::Str roomName = extractString(1, 3);
         rust::Str hostName = extractString(2, 3 + (int) in0(1));
 
         // smart ptr allows us to delay the initialization of room
-        m_room = std::make_unique<rust::Box<Room>>(create_room(
+        m_data_room = std::make_unique<rust::Box<DataRoom>>(create_data_room(
             roomName,
             hostName
         ));
@@ -80,17 +80,60 @@ namespace SuperStecker
         next_k(1);
     }
 
-    void SuperSteckerOut::next_k(int nSamples) {
+    void DataSteckerOut::next_k(int nSamples) {
         float val = in0(0);
-        float msg = send_message(**m_room, val);
+        float msg = send_data_message(**m_data_room, val);
         out0(0) = msg;
     }
+
+    /*
+
+    (Audio)Stecker IN
+
+    */
+   SteckerIn::SteckerIn() {
+        mCalcFunc = make_calc_function<SteckerIn, &SteckerIn::next>();
+
+        // @todo this does not work for audio rate :/
+        rust::Str roomName = extractString(0, 2);
+        rust::Str hostName = extractString(1, 2 + (int) in0(0));
+
+        // smart ptr allows us to delay the initialization of room
+        m_audio_room = std::make_unique<rust::Box<AudioRoomSender>>(create_audio_room_sender(
+            roomName,
+            hostName
+        ));
+
+        next(1);
+   }
+
+   void SteckerIn::next(int nSamples) {
+        // Audio rate input
+        const float* input = in(0);
+
+        // Control rate parameter: gain.
+        const float gain = 0.5f;
+
+        // Output buffer
+        float* outbuf = out(0);
+
+        std::vector<float> array(outbuf, outbuf + (nSamples * sizeof(float)));
+        rust::Slice<const float> slice{array.data(), array.size()};
+
+        push_values_to_web(**m_audio_room, slice);
+
+        // simple gain function
+        for (int i = 0; i < nSamples; ++i) {
+            outbuf[i] = input[i] * gain;
+        }
+   }
 
 } // namespace SuperStecker
 
 PluginLoad(SuperSteckerUGens) {
     // Plugin magic
     ft = inTable;
-    registerUnit<SuperStecker::SuperSteckerIn>(ft, "SuperSteckerIn", false);
-    registerUnit<SuperStecker::SuperSteckerOut>(ft, "SuperSteckerOut", false);
+    registerUnit<SuperStecker::DataSteckerIn>(ft, "DataSteckerIn", false);
+    registerUnit<SuperStecker::DataSteckerOut>(ft, "DataSteckerOut", false);
+    registerUnit<SuperStecker::SteckerIn>(ft, "SteckerIn", false);
 }
