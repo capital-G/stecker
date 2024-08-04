@@ -86,15 +86,6 @@ impl Mutation {
         }
     }
 
-    // async fn playback_audio_room<'a>(
-    //     &self,
-    //     ctx: &Context<'a>,
-    //     offer: String
-    // ) -> Result<String> {
-    //     let result = AudioRoom::playback_room(offer).await?;
-    //     Ok(result.offer)
-    // }
-
     async fn join_room<'a>(
         &self,
         ctx: &Context<'a>,
