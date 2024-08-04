@@ -2,7 +2,6 @@ use crate::{
     models::{AudioBroadcastRoom, BroadcastRoom, DataBroadcastRoom, Room, RoomType},
     state::RoomMapTrait,
 };
-use shared::models::DataRoomInternalType;
 
 use std::sync::Arc;
 use tokio::sync::Mutex;
