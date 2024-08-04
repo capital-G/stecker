@@ -114,10 +114,9 @@ namespace SuperStecker
     (Audio)Stecker IN
 
     */
-   SteckerIn::SteckerIn() {
-        mCalcFunc = make_calc_function<SteckerIn, &SteckerIn::next>();
+   SteckerOut::SteckerOut() {
+        mCalcFunc = make_calc_function<SteckerOut, &SteckerOut::next>();
 
-        // @todo this does not work for audio rate :/
         rust::Str roomName = extractStringAr(1, 3);
         rust::Str hostName = extractStringAr(2, 3 + (int) *in(1));
 
@@ -130,25 +129,14 @@ namespace SuperStecker
         next(1);
    }
 
-   void SteckerIn::next(int nSamples) {
-        // Audio rate input
+   void SteckerOut::next(int nSamples) {
         const float* input = in(0);
-
-        // Control rate parameter: gain.
-        const float gain = 0.5f;
-
-        // Output buffer
         float* outbuf = out(0);
-
-        // std::vector<float> array(outbuf, nSamples);
-        // rust::Slice<const float> slice{array.data(), array.size()};
-
-        push_values_to_web(**m_audio_room, outbuf, nSamples);
-
-        // simple gain function
+        // @todo avoid this
         for (int i = 0; i < nSamples; ++i) {
-            outbuf[i] = input[i] * gain;
+            outbuf[i] = input[i];
         }
+        push_values_to_web(**m_audio_room, outbuf, nSamples);
    }
 
 } // namespace SuperStecker
@@ -158,5 +146,5 @@ PluginLoad(SuperSteckerUGens) {
     ft = inTable;
     registerUnit<SuperStecker::DataSteckerIn>(ft, "DataSteckerIn", false);
     registerUnit<SuperStecker::DataSteckerOut>(ft, "DataSteckerOut", false);
-    registerUnit<SuperStecker::SteckerIn>(ft, "SteckerIn", false);
+    registerUnit<SuperStecker::SteckerOut>(ft, "SteckerOut", false);
 }

@@ -32,7 +32,7 @@ DataSteckerOut : UGen {
 	}
 }
 
-SteckerIn : UGen {
+SteckerOut : UGen {
 	*ar {|input, roomName, host="http://127.0.0.1:8000"|
 		^this.new1('audio', input, roomName, host);
 	}

@@ -41,9 +41,9 @@ public:
     std::unique_ptr<rust::Box<AudioRoomSender>> m_audio_room;
 };
 
-class SteckerIn : public AudioStecker {
+class SteckerOut : public AudioStecker {
 public:
-    SteckerIn();
+    SteckerOut();
 
 private:
     void next(int nSamples);
