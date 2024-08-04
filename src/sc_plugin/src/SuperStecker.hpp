@@ -11,6 +11,7 @@ class SuperStecker : public SCUnit {
 // needs to be public so it can be accessed by subclasses
 public:
     rust::Str extractString(int lenIndex, int startIndex);
+    rust::Str extractStringAr(int lenIndex, int startIndex);
 };
 
 class DataStecker : public SuperStecker {

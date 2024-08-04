@@ -224,9 +224,8 @@ pub struct AudioRoomSender {
 
 impl AudioRoomSender {
     pub fn create_room(name: &str, host: &str) -> Self {
-        // @todo hardcoded b/c audio rate transfer works differently
-        let name2 = "hello".to_owned();
-        let host2 = "http://127.0.0.1:8000".to_owned();
+        let name2 = name.to_owned();
+        let host2 = host.to_owned();
 
         // @todo make this configurable?
         // 20 ms
@@ -315,10 +314,9 @@ impl AudioRoomSender {
                     }
                 });
 
-                // @todo this should not be hardcoded
                 let api_client = APIClient { host: host2.to_string() };
 
-                match api_client.create_room("sc-hello", &shared::models::SteckerAPIRoomType::Audio, &offer).await {
+                match api_client.create_room(&name2, &shared::models::SteckerAPIRoomType::Audio, &offer).await {
                     Ok(answer) => {
                         let _ = connection.set_remote_description(answer).await.expect("Could not set remote description!");
 

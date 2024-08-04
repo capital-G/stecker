@@ -29,6 +29,29 @@ namespace SuperStecker
         return rust::Str(buff, strSize);
     }
 
+    // same as extractString but for audio rate as audio rate is using
+    // float pointers instead of discrete floats
+    rust::Str SuperStecker::extractStringAr(int sizeIndex, int startIndex) {
+        int strSize = *in(sizeIndex);
+
+        // +1 b/c of null termination
+        const int allocSize = (strSize + 1) * sizeof(char);
+
+        // necessary so ClearUnitIfMemFailed works
+        Unit* unit = (Unit*) this;
+        char* buff = (char*) RTAlloc(mWorld, allocSize);
+        // @todo this does not compile on linux :/
+        // ClearUnitIfMemFailed(buff);
+
+        for (int i = 0; i < strSize; i++) {
+            buff[i] = (char) *in(startIndex + i);
+        }
+        // terminate string
+        buff[strSize] = 0;
+
+        return rust::Str(buff, strSize);
+    }
+
     DataStecker::~DataStecker() {
         send_data_close_signal(**m_data_room);
     }
@@ -95,8 +118,8 @@ namespace SuperStecker
         mCalcFunc = make_calc_function<SteckerIn, &SteckerIn::next>();
 
         // @todo this does not work for audio rate :/
-        rust::Str roomName = extractString(0, 2);
-        rust::Str hostName = extractString(1, 2 + (int) in0(0));
+        rust::Str roomName = extractStringAr(1, 3);
+        rust::Str hostName = extractStringAr(2, 3 + (int) *in(1));
 
         // smart ptr allows us to delay the initialization of room
         m_audio_room = std::make_unique<rust::Box<AudioRoomSender>>(create_audio_room_sender(
