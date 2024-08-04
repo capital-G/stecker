@@ -102,7 +102,7 @@
                     <div class="field">
                         <label class="label">Float value</label>
                         <div class="control">
-                            <input class="input" x-model="$store.stecker.floatValue" :disabled="!$store.stecker.createdRoom"></input>
+                            <input class="input" type="number" step="0.01" x-model="$store.stecker.floatValue" :disabled="!$store.stecker.createdRoom"></input>
                         </div>
                     </div>
                     <button x-bind:disabled="!$store.stecker.createdRoom || $store.stecker.roomType !== 'FLOAT'" class="button" @click="$store.stecker.sendFloatValue()">Send value</button> <br />
