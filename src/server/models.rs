@@ -1,5 +1,4 @@
-use core::borrow;
-use std::time::Duration;
+use std::{fmt::Display, time::Duration};
 
 use async_graphql::{Enum, SimpleObject};
 use shared::{
@@ -17,6 +16,16 @@ pub enum RoomType {
     Float,
     Chat,
     Audio,
+}
+
+impl Display for RoomType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match &self {
+            RoomType::Float => write!(f, "FloatRoom"),
+            RoomType::Chat => write!(f, "ChatRoom"),
+            RoomType::Audio => write!(f, "AudioRoom"),
+        }
+    }
 }
 
 pub enum BroadcastRoom {
