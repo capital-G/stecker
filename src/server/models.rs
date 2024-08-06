@@ -1,4 +1,4 @@
-use std::{fmt::Display, time::Duration};
+use std::{fmt::Display, sync::Arc};
 
 use async_graphql::{Enum, SimpleObject};
 use shared::{
@@ -7,6 +7,8 @@ use shared::{
 };
 use tokio::sync::broadcast::Sender;
 use uuid::Uuid;
+use webrtc::track::track_local::track_local_static_rtp::TrackLocalStaticRTP;
+use webrtc::track::track_local::TrackLocalWriter;
 
 // graphql objects
 
@@ -292,11 +294,34 @@ impl AudioBroadcastRoom {
         offer: String,
     ) -> anyhow::Result<AudioBroadcastRoomWithOffer> {
         let connection = SteckerWebRTCConnection::build_connection().await?;
-        let audio_channel = connection.listen_for_audio_channel().await?;
+        // let audio_channel = connection.listen_for_audio_channel().await?;
+        let audio_channel = SteckerAudioChannel::create_channels();
+        let mut audio_track_receiver = connection.listen_for_remote_audio_track().await;
         let meta_channel = connection.register_channel(&DataRoomInternalType::Meta);
         let (num_listeners_sender, num_listeners_receiver) = tokio::sync::watch::channel(0);
-
         let response_offer = connection.respond_to_offer(offer).await?;
+
+        let audio_channel_tx = audio_channel.audio_channel_tx.clone();
+        let close_tx = audio_channel.close.clone();
+        tokio::spawn(async move {
+            let track = audio_track_receiver.recv().await.unwrap();
+            let local_track = Arc::new(TrackLocalStaticRTP::new(
+                track.codec().capability,
+                "audio".to_owned(),
+                "stecker".to_owned(),
+            ));
+
+            let _ = audio_channel_tx.send(Some(local_track.clone()));
+
+            // the actual forwarding
+            // @todo improve error handling
+            while let Ok((rtp, _)) = track.read_rtp().await {
+                let _ = local_track.write_rtp(&rtp).await;
+            }
+
+            println!("Nothing to transmit anymore?:O");
+            let _ = close_tx.send(());
+        });
 
         return Ok(AudioBroadcastRoomWithOffer {
             offer: response_offer,
@@ -316,9 +341,8 @@ impl AudioBroadcastRoom {
 
     pub async fn join_room(&self, offer: &str) -> anyhow::Result<ResponseOffer> {
         let connection = SteckerWebRTCConnection::build_connection().await?;
-        let meta_channel = connection.register_channel(&DataRoomInternalType::Meta);
+        // let meta_channel = connection.register_channel(&DataRoomInternalType::Meta);
 
-        let timeout = tokio::time::sleep(Duration::from_secs(10));
         let audio_track_receiver = self
             .stecker_audio_channel
             .audio_channel_tx
@@ -338,19 +362,6 @@ impl AudioBroadcastRoom {
             )),
         }
     }
-
-    // pub async fn playback_room(offer: String) -> anyhow::Result<Self> {
-    //     let connection = SteckerWebRTCConnection::build_connection().await?;
-    //     let _ = connection.playback_audio_file().await.expect("No audio channel :l");
-    //     let response_offer = connection.respond_to_offer(offer).await?;
-
-    //     // let stecker_data_channel = connection.register_channel(&room_type);
-    //     // let meta_channel = connection.register_channel(&SharedRoomType::Meta);
-
-    //     Ok(AudioRoom {
-    //         offer: response_offer
-    //     })
-    // }
 }
 
 impl Into<RoomType> for DataRoomInternalType {

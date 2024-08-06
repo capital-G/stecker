@@ -1,6 +1,6 @@
 use crate::models::{
-    ChannelName, DataChannelMap, DataRoomInternalType, SteckerAudioChannel, SteckerData,
-    SteckerDataChannel, SteckerDataChannelType,
+    ChannelName, DataChannelMap, DataRoomInternalType, SteckerData, SteckerDataChannel,
+    SteckerDataChannelType,
 };
 use crate::utils::{decode_b64, encode_offer};
 
@@ -20,7 +20,6 @@ use webrtc::peer_connection::RTCPeerConnection;
 use webrtc::rtp_transceiver::rtp_codec::RTCRtpCodecCapability;
 use webrtc::track::track_local::track_local_static_rtp::TrackLocalStaticRTP;
 use webrtc::track::track_local::track_local_static_sample::TrackLocalStaticSample;
-use webrtc::track::track_local::TrackLocalWriter;
 use webrtc::track::track_remote::TrackRemote;
 
 pub struct SteckerWebRTCConnection {
@@ -262,44 +261,6 @@ impl SteckerWebRTCConnection {
         let _ = self.peer_connection.add_track(audio_track.clone()).await?;
 
         Ok(audio_track)
-    }
-
-    pub async fn listen_for_audio_channel(&self) -> anyhow::Result<SteckerAudioChannel> {
-        let audio_channel = SteckerAudioChannel::create_channels();
-
-        let audio_channel_tx = audio_channel.audio_channel_tx.clone();
-        let close_tx = audio_channel.close.clone();
-
-        self.peer_connection.on_track(Box::new(move |track, _, _| {
-            println!("Received a track! :O");
-            // receive and forward any content via a local track
-            // this local track can then be passed to other connections
-            let audio_channel_tx2 = audio_channel_tx.clone();
-            let close_tx2 = close_tx.clone();
-
-            // why do we spawn a local track here if we could just pass along the track?
-            tokio::spawn(async move {
-                let local_track = Arc::new(TrackLocalStaticRTP::new(
-                    track.codec().capability,
-                    "audio".to_owned(),
-                    "stecker".to_owned(),
-                ));
-
-                let _ = audio_channel_tx2.send(Some(local_track.clone()));
-
-                // the actual forwarding
-                // @todo improve error handling
-                while let Ok((rtp, _)) = track.read_rtp().await {
-                    let _ = local_track.write_rtp(&rtp).await;
-                }
-
-                println!("Nothing to transmit anymore?:O");
-                let _ = close_tx2.send(());
-            });
-            Box::pin(async {})
-        }));
-
-        Ok(audio_channel)
     }
 
     pub async fn listen_for_remote_audio_track(&self) -> Receiver<Arc<TrackRemote>> {
