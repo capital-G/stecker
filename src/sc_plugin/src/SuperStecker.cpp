@@ -111,7 +111,7 @@ namespace SuperStecker
 
     /*
 
-    (Audio)Stecker IN
+    (Audio)SteckerOut
 
     */
    SteckerOut::SteckerOut() {
@@ -139,6 +139,33 @@ namespace SuperStecker
         push_values_to_web(**m_audio_room, outbuf, nSamples);
    }
 
+    /*
+
+    (Audio)SteckerIn
+
+    */
+   SteckerIn::SteckerIn() {
+        mCalcFunc = make_calc_function<SteckerIn, &SteckerIn::next>();
+
+        rust::Str roomName = extractStringAr(0, 2);
+        rust::Str hostName = extractStringAr(1, 2 + (int) *in(0));
+
+        // smart ptr allows us to delay the initialization of room
+        m_audio_room = std::make_unique<rust::Box<AudioRoomReceiver>>(create_audio_room_receiver(
+            roomName,
+            hostName,
+            mBufLength
+        ));
+
+        next(1);
+   }
+
+   void SteckerIn::next(int nSamples) {
+        const float* input = in(0);
+        float* outbuf = out(0);
+        pull_values_from_web(**m_audio_room, outbuf, nSamples);
+   }
+
 } // namespace SuperStecker
 
 PluginLoad(SuperSteckerUGens) {
@@ -147,4 +174,5 @@ PluginLoad(SuperSteckerUGens) {
     registerUnit<SuperStecker::DataSteckerIn>(ft, "DataSteckerIn", false);
     registerUnit<SuperStecker::DataSteckerOut>(ft, "DataSteckerOut", false);
     registerUnit<SuperStecker::SteckerOut>(ft, "SteckerOut", false);
+    registerUnit<SuperStecker::SteckerIn>(ft, "SteckerIn", false);
 }

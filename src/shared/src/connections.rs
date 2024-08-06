@@ -6,6 +6,7 @@ use crate::utils::{decode_b64, encode_offer};
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
+use tokio::sync::broadcast::Receiver;
 use webrtc::api::interceptor_registry::register_default_interceptors;
 use webrtc::api::media_engine::{MediaEngine, MIME_TYPE_OPUS};
 use webrtc::api::APIBuilder;
@@ -20,6 +21,7 @@ use webrtc::rtp_transceiver::rtp_codec::RTCRtpCodecCapability;
 use webrtc::track::track_local::track_local_static_rtp::TrackLocalStaticRTP;
 use webrtc::track::track_local::track_local_static_sample::TrackLocalStaticSample;
 use webrtc::track::track_local::TrackLocalWriter;
+use webrtc::track::track_remote::TrackRemote;
 
 pub struct SteckerWebRTCConnection {
     peer_connection: RTCPeerConnection,
@@ -275,6 +277,7 @@ impl SteckerWebRTCConnection {
             let audio_channel_tx2 = audio_channel_tx.clone();
             let close_tx2 = close_tx.clone();
 
+            // why do we spawn a local track here if we could just pass along the track?
             tokio::spawn(async move {
                 let local_track = Arc::new(TrackLocalStaticRTP::new(
                     track.codec().capability,
@@ -297,6 +300,25 @@ impl SteckerWebRTCConnection {
         }));
 
         Ok(audio_channel)
+    }
+
+    pub async fn listen_for_remote_audio_track(&self) -> Receiver<Arc<TrackRemote>> {
+        let (remote_track_tx, remote_track_rx) = tokio::sync::broadcast::channel(2);
+
+        let _ = self
+            .peer_connection
+            .add_transceiver_from_kind(
+                webrtc::rtp_transceiver::rtp_codec::RTPCodecType::Audio,
+                None,
+            )
+            .await;
+
+        self.peer_connection.on_track(Box::new(move |track, _, _| {
+            let _ = remote_track_tx.send(track);
+            Box::pin(async {})
+        }));
+
+        remote_track_rx
     }
 
     pub async fn add_existing_audio_track(&self, track: Arc<TrackLocalStaticRTP>) -> () {

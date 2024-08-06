@@ -2,10 +2,10 @@ use std::str::FromStr;
 use std::thread;
 use std::time::Duration;
 
-use bytes::{Bytes, BytesMut};
-use opus::{Channels as OpusChannels, Encoder as OpusEncoder};
+use bytes::Bytes;
+use opus::{Channels as OpusChannels, Decoder as OpusDecoder, Encoder as OpusEncoder};
 use ringbuf::traits::{Consumer, Observer, Producer, Split};
-use ringbuf::{HeapProd, HeapRb};
+use ringbuf::{HeapCons, HeapProd, HeapRb};
 use shared::models::SteckerAPIRoomType;
 use tokio::runtime::Runtime;
 use tokio::sync::broadcast::{self, Receiver, Sender};
@@ -237,9 +237,6 @@ impl AudioRoomSender {
         let ring_buffer = HeapRb::<f32>::new(48000);
         let (producer, mut consumer) = ring_buffer.split();
 
-        let (sender, mut receiver) = broadcast::channel::<f32>(1024);
-        let sender2 = sender.clone();
-
         let (close_sender, _) = broadcast::channel::<()>(1);
         let mut sc_close_receiver = close_sender.subscribe();
 
@@ -349,6 +346,121 @@ impl AudioRoomSender {
     }
 }
 
+pub struct AudioRoomReceiver {
+    name: String,
+    close_sender: Sender<()>,
+    consumer: HeapCons<f32>,
+}
+
+impl AudioRoomReceiver {
+    pub fn create_room(name: &str, host: &str, buffer_length: i32) -> Self {
+        // @todo we are assuming 48khz
+        let name2 = name.to_owned();
+        let name3 = name.to_owned();
+        let host2 = host.to_owned();
+
+        // @todo calculate the minimum needed size
+        let ring_buffer = HeapRb::<f32>::new(24000);
+        let (mut producer, consumer) = ring_buffer.split();
+
+        let (close_sender, _) = broadcast::channel::<()>(1);
+        let mut sc_close_receiver = close_sender.subscribe();
+
+        thread::spawn(move || {
+            let rt = Runtime::new().unwrap();
+            rt.block_on(async {
+                let connection = SteckerWebRTCConnection::build_connection().await?;
+                // let audio_track = connection.listen_for_audio_channel().await?;
+                let meta_channel = connection.create_data_channel(&DataRoomInternalType::Meta).await?;
+                let mut meta_recv = meta_channel.inbound.subscribe();
+                let mut audio_track_receiver = connection.listen_for_remote_audio_track().await;
+                let offer = connection.create_offer().await?;
+
+                println!("Our base64 offer is: {offer}");
+
+                // consume meta messages
+                tokio::spawn(async move {
+                    let mut webrtc_close_receiver = meta_channel.close.clone().subscribe();
+                    loop {
+                        tokio::select! {
+                            meta_msg = meta_recv.recv() =>{
+                                if let Ok(msg) = meta_msg {
+                                    println!("META: {msg}");
+                                }
+                            },
+                            _ = webrtc_close_receiver.recv() => {
+                                println!("Received stop signal from webrtc on pushing values to WebRTC");
+                                break
+                            },
+                        };
+                    }
+                    println!("Stopped forwarding messages from SC to WebRTC");
+                });
+
+                tokio::spawn(async move {
+                    let mut opus_decoder = OpusDecoder::new(48000, OpusChannels::Mono).expect("Could not init the opus decoder");
+
+                    // @todo adjust max size
+                    let mut raw_signal_buffer: Vec<f32> = vec![0.0; 10000];
+                    println!("Wait for audio track to be received");
+
+                        let received_audio_track = audio_track_receiver.recv().await.clone().unwrap();
+
+                        println!("Found some track! Start decoding");
+
+                        while let Ok((rtp, _)) = received_audio_track.read_rtp().await {
+                            match opus_decoder.decode_float(&*rtp.payload, &mut raw_signal_buffer, false) {
+                                Ok(opus_samples) => {
+                                    // Push the number of opus_samples from my signal buffer into the ring buffer
+                                    producer.push_slice(&raw_signal_buffer[..opus_samples]);
+                                },
+                                Err(err) => {
+                                    println!("Error decoding opus frame: {:?}", err);
+                                },
+                            }
+                        }
+                });
+
+                let api_client = APIClient { host: host2.to_string() };
+
+                match api_client.join_room(&name2, &shared::models::SteckerAPIRoomType::Audio, &offer).await {
+                    Ok(answer) => {
+                        println!("Received remote offer");
+                        let _ = connection.set_remote_description(answer).await.expect("Could not set remote description!");
+
+                        // // @todo wait for actual stop signal here
+                        let _ = sc_close_receiver.recv().await;
+
+                        println!("Close connection now");
+                        Ok(())
+                    }
+                    Err(err) => {
+                        println!("Failed to create audio room on server: {err}");
+                        Err(err)
+                    },
+                }
+            })
+        });
+
+        Self {
+            name: name3,
+            close_sender,
+            consumer,
+        }
+    }
+
+    pub fn pull_values_from_web(&mut self, values: &mut [f32]) -> () {
+        if self.consumer.occupied_len() < values.len() {
+            // println!("Not enough values in decodec ringbuf");
+            for v in values.iter_mut() {
+                *v = 0.0;
+            }
+        } else {
+            self.consumer.pop_slice(values);
+        }
+    }
+}
+
 fn create_data_room(name: &str, host: &str) -> Box<DataRoom> {
     Box::new(DataRoom::create_room(name, host))
 }
@@ -379,6 +491,23 @@ unsafe fn push_values_to_web(audio_room: &mut AudioRoomSender, values: *mut f32,
     let _ = audio_room.push_values_to_web(slice);
 }
 
+fn create_audio_room_receiver(
+    name: &str,
+    host: &str,
+    buffer_length: i32,
+) -> Box<AudioRoomReceiver> {
+    Box::new(AudioRoomReceiver::create_room(name, host, buffer_length))
+}
+
+unsafe fn pull_values_from_web(
+    audio_room: &mut AudioRoomReceiver,
+    values: *mut f32,
+    num_samples: i32,
+) {
+    let slice = unsafe { std::slice::from_raw_parts_mut(values, num_samples.try_into().unwrap()) };
+    audio_room.pull_values_from_web(slice);
+}
+
 #[cxx::bridge]
 mod ffi {
     extern "Rust" {
@@ -393,6 +522,18 @@ mod ffi {
         fn create_audio_room_sender(name: &str, host: &str) -> Box<AudioRoomSender>;
         unsafe fn push_values_to_web(
             audio_room: &mut AudioRoomSender,
+            values: *mut f32,
+            num_samples: i32,
+        );
+
+        type AudioRoomReceiver;
+        fn create_audio_room_receiver(
+            name: &str,
+            host: &str,
+            buffer_length: i32,
+        ) -> Box<AudioRoomReceiver>;
+        unsafe fn pull_values_from_web(
+            audio_room: &mut AudioRoomReceiver,
             values: *mut f32,
             num_samples: i32,
         );

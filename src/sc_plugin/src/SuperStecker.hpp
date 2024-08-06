@@ -36,14 +36,19 @@ private:
     void next_k(int nSamples);
 };
 
-class AudioStecker : public SuperStecker {
+class SteckerOut : public SuperStecker {
 public:
     std::unique_ptr<rust::Box<AudioRoomSender>> m_audio_room;
+    SteckerOut();
+
+private:
+    void next(int nSamples);
 };
 
-class SteckerOut : public AudioStecker {
+class SteckerIn : public SuperStecker {
 public:
-    SteckerOut();
+    std::unique_ptr<rust::Box<AudioRoomReceiver>> m_audio_room;
+    SteckerIn();
 
 private:
     void next(int nSamples);
