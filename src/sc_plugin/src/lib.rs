@@ -400,8 +400,8 @@ impl AudioRoomReceiver {
                 tokio::spawn(async move {
                     let mut opus_decoder = OpusDecoder::new(48000, OpusChannels::Mono).expect("Could not init the opus decoder");
 
-                    // @todo adjust max size
-                    let mut raw_signal_buffer: Vec<f32> = vec![0.0; 10000];
+                    // max size from https://opus-codec.org/docs/opus_api-1.2/group__opus__decoder.html#ga9c554b8c0214e24733a299fe53bb3bd2
+                    let mut raw_signal_buffer: Vec<f32> = vec![0.0; 5760];
                     println!("Wait for audio track to be received");
 
                         let received_audio_track = audio_track_receiver.recv().await.clone().unwrap();
