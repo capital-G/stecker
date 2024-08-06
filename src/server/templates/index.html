@@ -14,13 +14,13 @@
         <h2>Rooms</h2>
         <div class="columns">
             <div class="column">
-                <span class="button" @click="$store.stecker.getRooms('CHAT')">Load chat rooms</span>
+                <span class="button room-button" @click="$store.stecker.getRooms('CHAT')">Load chat rooms</span>
             </div>
             <div class="column">
-                <span class="button" @click="$store.stecker.getRooms('FLOAT')">Load float rooms</span>
+                <span class="button room-button" @click="$store.stecker.getRooms('FLOAT')">Load float rooms</span>
             </div>
             <div class="column">
-                <span class="button" @click="$store.stecker.getRooms('AUDIO')">Load audio rooms</span>
+                <span class="button room-button" @click="$store.stecker.getRooms('AUDIO')">Load audio rooms</span>
             </div>
         </div>
         <div class="rooms">
@@ -88,7 +88,14 @@
                 </div>
             </div>
 
-            <button class="button is-link" @click="$store.stecker.createRoom(roomName, roomType)" x-bind:disabled="(roomName.length == 0) || (roomType == '') || $store.stecker.connected">Create room</button><br/>
+            <button
+                style="width: 100%;"
+                class="button is-link"
+                @click="$store.stecker.createRoom(roomName, roomType)"
+                x-bind:disabled="(roomName.length == 0) || (roomType == '') || $store.stecker.connected"
+            >Create room</button>
+
+            <br/>
 
             <div class="columns">
                 <div class="column">
