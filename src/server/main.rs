@@ -47,7 +47,7 @@ async fn main() {
     let app = Router::new()
         .route("/", get(graphiql).post_service(GraphQL::new(schema)))
         .nest_service(
-            "/debug",
+            "/debug/",
             ServeDir::new(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("templates")),
         );
 
