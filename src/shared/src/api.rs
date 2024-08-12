@@ -26,7 +26,15 @@ struct JoinRoomData {
 }
 
 pub struct APIClient {
-    pub host: String,
+    graphql_url: String,
+}
+
+impl APIClient {
+    pub fn new(host: String) -> Self {
+        Self {
+            graphql_url: format!("{host}/graphql"),
+        }
+    }
 }
 
 // @todo make this static?
@@ -61,22 +69,26 @@ impl APIClient {
 
         let client = reqwest::Client::new();
         let res = client
-            .post(&self.host)
+            .post(&self.graphql_url)
             .header("Content-Type", "application/json")
             .header("Accept", "application/json")
             .body(query.to_string())
             .send()
             .await?;
 
-        match res.json::<GQLResponse<CreateRoomData>>().await {
+        let text = res.text().await?;
+        let json: anyhow::Result<GQLResponse<CreateRoomData>> =
+            serde_json::from_str::<GQLResponse<CreateRoomData>>(&text).map_err(Into::into);
+
+        match json {
             Ok(result) => {
                 println!("Response from server: {result:?}");
                 let desc_data = decode_b64(result.data.create_room.as_str())?;
                 let answer = serde_json::from_str::<RTCSessionDescription>(&desc_data)?;
                 return Ok(answer);
             }
-            Err(msg) => {
-                bail!("Received unexpected response from server: {msg}")
+            Err(err) => {
+                bail!("Received unexpected response from server: {err} - {text}");
             }
         }
     }
@@ -99,7 +111,7 @@ impl APIClient {
 
         let client = reqwest::Client::new();
         let res = client
-            .post(&self.host)
+            .post(&self.graphql_url)
             .header("Content-Type", "application/json")
             .header("Accept", "application/json")
             .body(query.to_string())

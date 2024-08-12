@@ -108,9 +108,7 @@ async fn create_room(
     let data_channel = connection.create_data_channel(&room_type).await?;
     let data_outbound = data_channel.outbound.clone();
 
-    let api_client = APIClient {
-        host: host.to_string(),
-    };
+    let api_client = APIClient::new(host.to_string());
 
     let offer = connection.create_offer().await?;
 
@@ -172,9 +170,7 @@ async fn join_room(
 
     let offer = connection.create_offer().await?;
 
-    let api_client = APIClient {
-        host: host.to_string(),
-    };
+    let api_client = APIClient::new(host.to_string());
 
     match api_client
         .join_room(name, &(client_room_type.clone().into()), &offer)

@@ -30,7 +30,7 @@ pub struct DataRoom {
 impl DataRoom {
     pub fn join_room(name: &str, host: &str) -> Self {
         let name2 = String::from_str(name).unwrap();
-        let host2 = String::from_str(host).unwrap();
+        let host2 = host.to_owned();
 
         let (sender, _) = broadcast::channel::<f32>(1024);
         let sender2 = sender.clone();
@@ -52,7 +52,7 @@ impl DataRoom {
                     .unwrap();
                 let offer = connection.create_offer().await.unwrap();
 
-                let api_client = APIClient { host: host2 };
+                let api_client = APIClient::new(host2);
 
                 match api_client
                     .join_room(
@@ -119,7 +119,7 @@ impl DataRoom {
 
     pub fn create_room(name: &str, host: &str) -> Self {
         let name2 = String::from_str(name).unwrap();
-        let host2 = String::from_str(host).unwrap();
+        let host2 = host.to_owned();
 
         let (sender, mut receiver) = broadcast::channel::<f32>(1024);
         let sender2 = sender.clone();
@@ -161,7 +161,7 @@ impl DataRoom {
                     println!("Stopped forwarding messages from SC to WebRTC");
                 });
 
-                let api_client = APIClient { host: host2 };
+                let api_client = APIClient::new(host2);
 
                 match api_client.create_room(&name2, &shared::models::SteckerAPIRoomType::Data(shared::models::DataRoomPublicType::Float), &offer).await {
                     Ok(answer) => {
@@ -311,7 +311,7 @@ impl AudioRoomSender {
                     }
                 });
 
-                let api_client = APIClient { host: host2.to_string() };
+                let api_client = APIClient::new(host2.to_string());
 
                 match api_client.create_room(&name2, &shared::models::SteckerAPIRoomType::Audio, &offer).await {
                     Ok(answer) => {
@@ -421,7 +421,7 @@ impl AudioRoomReceiver {
                         }
                 });
 
-                let api_client = APIClient { host: host2.to_string() };
+                let api_client = APIClient::new(host2);
 
                 match api_client.join_room(&name2, &shared::models::SteckerAPIRoomType::Audio, &offer).await {
                     Ok(answer) => {

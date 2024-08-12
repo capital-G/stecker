@@ -33,7 +33,7 @@ struct Cli {
 }
 
 async fn graphiql() -> impl IntoResponse {
-    response::Html(GraphiQLSource::build().endpoint("/").finish())
+    response::Html(GraphiQLSource::build().endpoint("/graphql").finish())
 }
 
 #[tokio::main]
@@ -45,9 +45,9 @@ async fn main() {
         .finish();
 
     let app = Router::new()
-        .route("/", get(graphiql).post_service(GraphQL::new(schema)))
+        .route("/graphql", get(graphiql).post_service(GraphQL::new(schema)))
         .nest_service(
-            "/debug/",
+            "/",
             ServeDir::new(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("templates")),
         );
 
