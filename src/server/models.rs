@@ -341,7 +341,7 @@ impl AudioBroadcastRoom {
 
     pub async fn join_room(&self, offer: &str) -> anyhow::Result<ResponseOffer> {
         let connection = SteckerWebRTCConnection::build_connection().await?;
-        // let meta_channel = connection.register_channel(&DataRoomInternalType::Meta);
+        let _meta_channel = connection.register_channel(&DataRoomInternalType::Meta);
 
         let audio_track_receiver = self
             .stecker_audio_channel
