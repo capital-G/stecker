@@ -7,6 +7,7 @@ use crate::models::{BroadcastRoom, Room, RoomType};
 pub struct AppState {
     pub float_rooms: RoomMap,
     pub chat_rooms: RoomMap,
+    pub audio_rooms: RoomMap,
 }
 
 impl AppState {
@@ -18,18 +19,23 @@ impl AppState {
             chat_rooms: RoomMap {
                 map: Mutex::new(HashMap::new()),
             },
+            audio_rooms: RoomMap {
+                map: Mutex::new(HashMap::new()),
+            },
         }
     }
 
     pub async fn reset_rooms(&self) {
         self.chat_rooms.reset_state().await;
         self.float_rooms.reset_state().await;
+        self.audio_rooms.reset_state().await;
     }
 
     pub async fn room_exists(&self, room_name: &str, room_type: &RoomType) -> bool {
         match room_type {
             RoomType::Float => self.float_rooms.room_exists(room_name).await,
             RoomType::Chat => self.chat_rooms.room_exists(room_name).await,
+            RoomType::Audio => self.audio_rooms.room_exists(room_name).await,
         }
     }
 }

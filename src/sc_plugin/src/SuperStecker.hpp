@@ -11,27 +11,47 @@ class SuperStecker : public SCUnit {
 // needs to be public so it can be accessed by subclasses
 public:
     rust::Str extractString(int lenIndex, int startIndex);
-    std::unique_ptr<rust::Box<Room>> m_room;
-    ~SuperStecker();
+    rust::Str extractStringAr(int lenIndex, int startIndex);
 };
 
-class SuperSteckerIn : public SuperStecker {
+class DataStecker : public SuperStecker {
 public:
-    SuperSteckerIn();
+    std::unique_ptr<rust::Box<DataRoom>> m_data_room;
+    ~DataStecker();
+};
 
-    // ~SuperSteckerIn();
+class DataSteckerIn : public DataStecker {
+public:
+    DataSteckerIn();
+
 private:
     void next_k(int nSamples);
 };
 
-class SuperSteckerOut : public SuperStecker {
+class DataSteckerOut : public DataStecker {
 public:
-    SuperSteckerOut();
-
-    // ~SuperSteckerOut();
+    DataSteckerOut();
 
 private:
     void next_k(int nSamples);
+};
+
+class SteckerOut : public SuperStecker {
+public:
+    std::unique_ptr<rust::Box<AudioRoomSender>> m_audio_room;
+    SteckerOut();
+
+private:
+    void next(int nSamples);
+};
+
+class SteckerIn : public SuperStecker {
+public:
+    std::unique_ptr<rust::Box<AudioRoomReceiver>> m_audio_room;
+    SteckerIn();
+
+private:
+    void next(int nSamples);
 };
 
 } // namespace SuperStecker

@@ -2,6 +2,8 @@
 
 <head>
     <title>Stecker debug</title>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
     <script src="//unpkg.com/alpinejs"></script>
     <script src="stecker.js"></script>
     <link rel="stylesheet" href="style.css" />
@@ -10,63 +12,103 @@
 <body>
     <div class="content container" x-data>
         <h2>Rooms</h2>
+        <div class="columns">
+            <div class="column">
+                <span class="button room-button" @click="$store.stecker.getRooms('chat')">Load chat rooms</span>
+            </div>
+            <div class="column">
+                <span class="button room-button" @click="$store.stecker.getRooms('float')">Load float rooms</span>
+            </div>
+            <div class="column">
+                <span class="button room-button" @click="$store.stecker.getRooms('audio')">Load audio rooms</span>
+            </div>
+        </div>
         <div class="rooms">
-            <ul class="rooms">
-                <template x-for="room in $store.stecker.rooms">
-                    <div>
-                        <li>
-                            <button class="button" @click="$store.stecker.joinRoom(`${room.name}`)" x-bind:disabled="!$store.stecker.localSessionDescription" x-text="`Join room ${room.name}`"></button>
-                        </li>
-                    </div>
-                </template>
-            </ul>
-            <span class="button" @click="$store.stecker.getRooms()">Reload rooms</span>
+            <table class="table" style="width: 100%;">
+                <thead>
+                    <tr>
+                        <th>Name</th>
+                        <th>UUID</th>
+                        <th># Listeners</th>
+                        <th>Action</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <template x-for="room in $store.stecker.rooms">
+                        <tr>
+                            <th x-text="room.name"></th>
+                            <th x-text="room.uuid"></th>
+                            <th x-text="room.numListeners"></th>
+                            <th><button class="button" @click="$store.stecker.joinRoom(`${room.name}`, `${room.roomType}`)" x-bind:disabled="$store.stecker.connectedRoom">Join</button></th>
+                        </tr>
+                    </template>
+                </tbody>
+            </table>
         </div>
 
 
-        <div class="form" x-data="{roomName: ''}">
-            <div class="field">
-                <label class="label">Browser base64 Session Description</label>
-                <div class="control">
-                    <input class="input" disabled readonly="true" :value="$store.stecker.localSessionDescription"></input>
+        <div class="form" x-data="{roomName: '', roomType: ''}">
+            <div class="columns">
+                <div class="column is-four-fifths">
+                    <div class="field">
+                        <label class="label">Room name</label>
+                        <div class="control">
+                            <input class="input" x-model="roomName" x-bind:disabled="$store.stecker.steckerDataChannel !== null"></input>
+                        </div>
+                    </div>
+                </div>
+                <div class="column">
+                    <div class="field">
+                        <label class="label">Room type</label>
+                        <div class="control">
+                            <div class="select" style="width: 100%;">
+                                <select style="width: 100%;" required x-model="roomType" x-bind:disabled="$store.stecker.steckerDataChannel !== null">
+                                    <option value="">Select...</option>
+                                    <option value="float">Float</option>
+                                    <option value="chat">Chat</option>
+                                    <option value="audio">Audio</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
                 </div>
             </div>
 
-            <div class="field">
-                <label class="label">Stecker base64 Session Description</label>
-                <div class="control">
-                    <input class="input" disabled :value="$store.stecker.remoteSessionDescription"></input>
-                </div>
-            </div>
+            <button
+                style="width: 100%;"
+                class="button is-link"
+                @click="$store.stecker.createRoom(roomName, roomType)"
+                x-bind:disabled="(roomName.length == 0) || (roomType == '') || $store.stecker.steckerDataChannel !== null"
+            >Create room</button>
 
-            <div class="field">
-                <label class="label">Room name</label>
-                <div class="control">
-                    <input class="input" x-model="roomName" x-bind:disabled="$store.stecker.createdRoom"></input>
-                </div>
-            </div>
-
-            <button class="button is-link" @click="$store.stecker.createRoom(roomName)" x-bind:disabled="(roomName.length == 0) || $store.stecker.remoteSessionDescription!==null">Create room</button><br/>
-
+            <br/>
 
             <div class="columns">
                 <div class="column">
                     <div class="field">
-                        <label class="label">Message</label>
+                        <label class="label">Chat message</label>
                         <div class="control">
-                            <input class="input" x-model="$store.stecker.message" :disabled="!$store.stecker.createdRoom"></input>
+                            <input class="input" x-model="$store.stecker.chatValue" x-bind:disabled="!$store.stecker.allowSendChat"></input>
                         </div>
                     </div>
-                    <button x-bind:disabled="!$store.stecker.createdRoom" class="button" @click="$store.stecker.sendMessage()">Send Message</button> <br />
+                    <button x-bind:disabled="!$store.stecker.allowSendChat" class="button" @click="$store.stecker.sendChatValue()">Send Message</button> <br />
                 </div>
                 <div class="column">
                     <div class="field">
-                        <label class="label">Value</label>
+                        <label class="label">Float value</label>
                         <div class="control">
-                            <input class="input" x-model="$store.stecker.value" :disabled="!$store.stecker.createdRoom"></input>
+                            <input class="input" type="number" step="0.01" x-model="$store.stecker.floatValue" :disabled="!$store.stecker.allowSendFloat"></input>
                         </div>
                     </div>
-                    <button x-bind:disabled="!$store.stecker.createdRoom" class="button" @click="$store.stecker.sendMessage()">Send value</button> <br />
+                    <button x-bind:disabled="!$store.stecker.allowSendFloat" class="button" @click="$store.stecker.sendFloatValue()">Send value</button> <br />
+                </div>
+                <div class="column">
+                    <div class="field">
+                        <label class="label">Audio</label>
+                        <div class="control">
+                            <audio controls style="width: 100%;" id="audio-player"></audio>
+                        </div>
+                    </div>
                 </div>
         </div>
 
@@ -79,9 +121,6 @@
                 </article>
             </template>
         </div>
-
     </div>
-
 </body>
-
 </html>

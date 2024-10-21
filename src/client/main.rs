@@ -6,7 +6,7 @@ use clap::{Parser, Subcommand};
 use models::ClientRoomType;
 use shared::api::APIClient;
 use shared::connections::SteckerWebRTCConnection;
-use shared::models::{PublicRoomType, RoomType, SteckerData};
+use shared::models::{DataRoomInternalType, SteckerData};
 
 const LOCAL_HOST: &str = "http://127.0.0.1:8000";
 
@@ -98,23 +98,22 @@ async fn create_room(
 ) -> anyhow::Result<()> {
     let connection = SteckerWebRTCConnection::build_connection().await?;
 
-    let public_room_type = PublicRoomType::from(client_room_type.clone());
-    let room_type = RoomType::from(client_room_type.clone());
+    let room_type = DataRoomInternalType::from(client_room_type.clone());
 
-    let meta_data_channel = connection.create_data_channel(&RoomType::Meta).await?;
+    let meta_data_channel = connection
+        .create_data_channel(&DataRoomInternalType::Meta)
+        .await?;
     let mut meta_msg_receiver = meta_data_channel.inbound.subscribe();
 
     let data_channel = connection.create_data_channel(&room_type).await?;
     let data_outbound = data_channel.outbound.clone();
 
-    let api_client = APIClient {
-        host: host.to_string(),
-    };
+    let api_client = APIClient::new(host.to_string());
 
     let offer = connection.create_offer().await?;
 
     match api_client
-        .create_room(name, &public_room_type, &offer)
+        .create_room(name, &client_room_type.into(), &offer)
         .await
     {
         Ok(answer) => {
@@ -160,21 +159,23 @@ async fn join_room(
     host: &str,
     client_room_type: &ClientRoomType,
 ) -> anyhow::Result<()> {
-    let public_room_type = PublicRoomType::from(client_room_type.clone());
-    let room_type = RoomType::from(client_room_type.clone());
+    let room_type = DataRoomInternalType::from(client_room_type.clone());
 
     let connection = SteckerWebRTCConnection::build_connection().await?;
 
     let stecker_data_channel = connection.create_data_channel(&room_type).await?;
-    let stecker_meta_channel = connection.create_data_channel(&RoomType::Meta).await?;
+    let stecker_meta_channel = connection
+        .create_data_channel(&DataRoomInternalType::Meta)
+        .await?;
 
     let offer = connection.create_offer().await?;
 
-    let api_client = APIClient {
-        host: host.to_string(),
-    };
+    let api_client = APIClient::new(host.to_string());
 
-    match api_client.join_room(name, &public_room_type, &offer).await {
+    match api_client
+        .join_room(name, &(client_room_type.clone().into()), &offer)
+        .await
+    {
         Ok(answer) => {
             // Apply the answer as the remote description
             connection.set_remote_description(answer).await?;

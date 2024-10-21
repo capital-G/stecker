@@ -1,4 +1,7 @@
-use crate::{models::PublicRoomType, utils::decode_b64};
+use crate::{
+    models::{DataRoomPublicType, SteckerAPIRoomType},
+    utils::decode_b64,
+};
 use anyhow::bail;
 use reqwest::StatusCode;
 use serde::Deserialize;
@@ -23,15 +26,26 @@ struct JoinRoomData {
 }
 
 pub struct APIClient {
-    pub host: String,
+    graphql_url: String,
+}
+
+impl APIClient {
+    pub fn new(host: String) -> Self {
+        Self {
+            graphql_url: format!("{host}/graphql"),
+        }
+    }
 }
 
 // @todo make this static?
-impl Into<String> for &PublicRoomType {
+impl Into<String> for &SteckerAPIRoomType {
     fn into(self) -> String {
         match self {
-            PublicRoomType::Float => "FLOAT".to_string(),
-            PublicRoomType::Chat => "CHAT".to_string(),
+            SteckerAPIRoomType::Audio => "AUDIO".to_owned(),
+            SteckerAPIRoomType::Data(data_channel) => match data_channel {
+                DataRoomPublicType::Float => "FLOAT".to_owned(),
+                DataRoomPublicType::Chat => "CHAT".to_owned(),
+            },
         }
     }
 }
@@ -40,7 +54,7 @@ impl APIClient {
     pub async fn create_room(
         &self,
         name: &str,
-        room_type: &PublicRoomType,
+        room_type: &SteckerAPIRoomType,
         local_session_description: &str,
     ) -> anyhow::Result<RTCSessionDescription> {
         let room_string: String = room_type.into();
@@ -55,22 +69,26 @@ impl APIClient {
 
         let client = reqwest::Client::new();
         let res = client
-            .post(&self.host)
+            .post(&self.graphql_url)
             .header("Content-Type", "application/json")
             .header("Accept", "application/json")
             .body(query.to_string())
             .send()
             .await?;
 
-        match res.json::<GQLResponse<CreateRoomData>>().await {
+        let text = res.text().await?;
+        let json: anyhow::Result<GQLResponse<CreateRoomData>> =
+            serde_json::from_str::<GQLResponse<CreateRoomData>>(&text).map_err(Into::into);
+
+        match json {
             Ok(result) => {
                 println!("Response from server: {result:?}");
                 let desc_data = decode_b64(result.data.create_room.as_str())?;
                 let answer = serde_json::from_str::<RTCSessionDescription>(&desc_data)?;
                 return Ok(answer);
             }
-            Err(msg) => {
-                bail!("Received unexpected response from server: {msg}")
+            Err(err) => {
+                bail!("Received unexpected response from server: {err} - {text}");
             }
         }
     }
@@ -78,7 +96,7 @@ impl APIClient {
     pub async fn join_room(
         &self,
         name: &str,
-        room_type: &PublicRoomType,
+        room_type: &SteckerAPIRoomType,
         local_session_description: &str,
     ) -> anyhow::Result<RTCSessionDescription> {
         let room_string: String = room_type.into();
@@ -93,7 +111,7 @@ impl APIClient {
 
         let client = reqwest::Client::new();
         let res = client
-            .post(&self.host)
+            .post(&self.graphql_url)
             .header("Content-Type", "application/json")
             .header("Accept", "application/json")
             .body(query.to_string())
