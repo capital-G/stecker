@@ -6,13 +6,14 @@ use shared::{
     models::{DataRoomInternalType, SteckerAudioChannel, SteckerData},
 };
 use tokio::sync::broadcast::Sender;
+use tracing::{error, info, trace, warn, Instrument, Span};
 use uuid::Uuid;
 use webrtc::track::track_local::track_local_static_rtp::TrackLocalStaticRTP;
 use webrtc::track::track_local::TrackLocalWriter;
 
 // graphql objects
 
-#[derive(Enum, Copy, Clone, Eq, PartialEq)]
+#[derive(Enum, Copy, Clone, Eq, PartialEq, Debug)]
 // #[graphql(remote = "shared::models::RoomType")]
 pub enum RoomType {
     Float,
@@ -128,34 +129,40 @@ impl DataBroadcastRoom {
         let meta_outbound = meta_channel.outbound.clone();
         let mut meta_inbound = meta_channel.inbound.subscribe();
         let name2 = name.clone();
-        tokio::spawn(async move {
-            loop {
-                tokio::select! {
-                    _ = num_listeners_receiver2.changed() => {
-                        let cur_num_listeners = *num_listeners_receiver2.borrow();
-                        let msg = format!("Number of listeners @ {name2}: {cur_num_listeners}");
-                        println!("{msg}");
-                        let _ = meta_outbound.send(SteckerData::String(msg));
-                    },
-                    raw_meta_msg = meta_inbound.recv() => {
-                        match raw_meta_msg {
-                            Ok(meta_msg) => {
-                                match meta_msg {
-                                    SteckerData::String(msg) => {
-                                        println!("Received meta_message form creator: {msg}");
-                                    },
-                                    _ => {println!("Received f32 from meta message?!");}
-                                }
+        tokio::spawn(
+            async move {
+                loop {
+                    tokio::select! {
+                        _ = num_listeners_receiver2.changed() => {
+                            let cur_num_listeners = *num_listeners_receiver2.borrow();
+                            info!(cur_num_listeners, "Changed number of listeners");
+                            let _ = meta_outbound.send(SteckerData::String(
+                                format!("Number of listeners @ {name2}: {cur_num_listeners}")
+                            ));
+                        },
+                        raw_meta_msg = meta_inbound.recv() => {
+                            match raw_meta_msg {
+                                Ok(meta_msg) => {
+                                    match meta_msg {
+                                        SteckerData::String(msg) => {
+                                            trace!(msg, "Received meta_message form creator");
+                                        },
+                                        _ => {error!("Received f32 from meta message?!");}
+                                    }
 
-                            },
-                            Err(err) => println!("Could not receive meta message from creator: {err}"),
-                        }
-                    },
-                    _ = close_receiver.recv() => break,
+                                },
+                                Err(_) => {
+                                    error!("Could not receive meta message from creator");
+                                },
+                            }
+                        },
+                        _ = close_receiver.recv() => break,
 
+                    }
                 }
             }
-        });
+            .instrument(Span::current()),
+        );
 
         let broadcast_room = DataBroadcastRoom {
             meta: BroadcastRoomMeta {
@@ -217,47 +224,52 @@ impl DataBroadcastRoom {
                                 while room_receiver.len() > 0 {
                                     let _ = room_receiver.recv().await;
                                 }
-                                println!("Got some lagging problems: {err}");
+                                match err {
+                                    tokio::sync::broadcast::error::RecvError::Closed => error!("Channel is already closed"),
+                                    tokio::sync::broadcast::error::RecvError::Lagged(lag) => warn!(lag, "Lagging behind"),
+                                }
                             },
                         }
                     },
                     raw_msg = inbound_receiver.recv() => {
                         match raw_msg {
-                            Ok(msg) => {println!("Broadcasting message from subscriber (will be ignored): {msg}");},
-                            Err(err) => {println!("Got errors when receiving inbound message: {err}")},
+                            Ok(msg) => warn!(?msg, "Broadcasting message from subscriber will be ignored"),
+                            Err(_) => error!("Error while receiving inbound message"),
                         }
                     },
                     raw_meta_msg = meta_receiver.recv() => {
                         match raw_meta_msg {
                             Ok(meta_msg) => {
+                                trace!(?meta_msg, "Send out meta message");
                                 let _ = meta_channel.outbound.send(meta_msg);
                             },
-                            Err(err) => {println!("Error forwarding meta message: {err}")},
+                            Err(_) => {error!("Failed to forward meta message")},
                         }
                     },
                     raw_msg = meta_inbound_receiver.recv() => {
                         match raw_msg {
-                            Ok(meta_msg) => println!("Meta message from subscriber (will be ignored): {meta_msg}"),
-                            Err(err) => println!("Error on receiving inbound meta message: {err}"),
+                            Ok(meta_msg) => warn!(?meta_msg, "Meta message from subscriber will be ignored"),
+                            Err(_) => error!("Error on receiving inbound meta message"),
                         }
                     },
                     _ = num_listeners_receiver.changed() => {
                         let cur_num_listeners = *num_listeners_receiver.borrow();
+                        info!(cur_num_listeners, "Number of listeners changed");
                         let _ = meta_channel.outbound.send(SteckerData::String(format!("Number of listeners: {cur_num_listeners}").to_string()));
                     },
                     _ = stop_receiver2.recv() => {
-                        println!("Got triggered and stop consuming inbound messages now");
+                        trace!("Stop consuming inbound messages now");
                         break
                     },
                     _ = stop_receiver.recv() => {
-                        println!("Received a stop signal");
+                        trace!("Received stop signal");
                         break
                     }
                 };
             }
             let cur_num_listeners = *num_listeners2.borrow();
             let _ = num_listeners2.send(cur_num_listeners - 1);
-        });
+        }.instrument(Span::current()));
         Ok(response_offer)
     }
 }
@@ -319,7 +331,7 @@ impl AudioBroadcastRoom {
                 let _ = local_track.write_rtp(&rtp).await;
             }
 
-            println!("Nothing to transmit anymore?:O");
+            info!("Nothing to transmit anymore - closing time.");
             let _ = close_tx.send(());
         });
 
@@ -352,7 +364,7 @@ impl AudioBroadcastRoom {
 
         match audio_track_receiver {
             Some(audio_track) => {
-                println!("Found an audio track :)");
+                info!("Found an audio track");
                 let _ = connection.add_existing_audio_track(audio_track).await;
                 let response_offer = connection.respond_to_offer(offer.to_owned()).await?;
                 Ok(response_offer)
