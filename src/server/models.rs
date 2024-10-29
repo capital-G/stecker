@@ -6,7 +6,7 @@ use shared::{
     models::{DataRoomInternalType, SteckerAudioChannel, SteckerData},
 };
 use tokio::sync::broadcast::Sender;
-use tracing::{error, info, trace, warn, Instrument, Span};
+use tracing::{error, info, instrument, trace, warn, Instrument, Span};
 use uuid::Uuid;
 use webrtc::track::track_local::track_local_static_rtp::TrackLocalStaticRTP;
 use webrtc::track::track_local::TrackLocalWriter;
@@ -107,18 +107,28 @@ pub struct BroadcastRoomWithOffer {
 }
 
 impl DataBroadcastRoom {
+    #[instrument(skip_all, err)]
     pub async fn create_room(
         name: String,
         offer: String,
         room_type: DataRoomInternalType,
     ) -> anyhow::Result<BroadcastRoomWithOffer> {
-        let connection = SteckerWebRTCConnection::build_connection().await?;
-        let response_offer = connection.respond_to_offer(offer).await?;
+        info!("Something else");
+        let connection = SteckerWebRTCConnection::build_connection()
+            .instrument(Span::current())
+            .await?;
+        let response_offer = connection
+            .respond_to_offer(offer)
+            .instrument(Span::current())
+            .await?;
 
         let stecker_data_channel = connection.register_channel(&room_type);
         let meta_channel = connection.register_channel(&DataRoomInternalType::Meta);
 
-        connection.start_listening_for_data_channel().await;
+        connection
+            .start_listening_for_data_channel()
+            .instrument(Span::current())
+            .await;
 
         let (num_listeners_sender, num_listeners_receiver) = tokio::sync::watch::channel(0);
 
@@ -184,13 +194,17 @@ impl DataBroadcastRoom {
         })
     }
 
+    #[instrument(skip_all, err)]
     pub async fn join_room(&self, offer: &str) -> anyhow::Result<ResponseOffer> {
         let connection = SteckerWebRTCConnection::build_connection().await?;
         let response_offer = connection.respond_to_offer(offer.to_string()).await?;
 
         let meta_channel = connection.register_channel(&DataRoomInternalType::Meta);
         let stecker_data_channel = connection.register_channel(&self.room_type.into());
-        connection.start_listening_for_data_channel().await;
+        connection
+            .start_listening_for_data_channel()
+            .instrument(Span::current())
+            .await;
 
         let room_rx = self.broadcast.clone();
         let meta_rx = self.meta.meta_broadcast.clone();

@@ -4,9 +4,13 @@ use crate::models::{
 };
 use crate::utils::{decode_b64, encode_offer};
 
+use anyhow::anyhow;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use tokio::sync::broadcast::Receiver;
+use tracing::{
+    error_span, info, info_span, instrument, span, trace, trace_span, warn, Instrument, Span,
+};
 use webrtc::api::interceptor_registry::register_default_interceptors;
 use webrtc::api::media_engine::{MediaEngine, MIME_TYPE_OPUS};
 use webrtc::api::APIBuilder;
@@ -82,6 +86,7 @@ impl SteckerWebRTCConnection {
         offer
     }
 
+    #[instrument(skip_all, err)]
     pub async fn create_offer(&self) -> anyhow::Result<String> {
         // Create an offer to send to the browser
         let offer = self.peer_connection.create_offer(None).await?;
@@ -102,8 +107,7 @@ impl SteckerWebRTCConnection {
             let b64 = encode_offer(local_desc)?;
             Ok(b64)
         } else {
-            println!("generate local_description failed!");
-            Err(anyhow::Error::msg("generate local_description failed!"))
+            Err(anyhow!("generate local_description failed!"))
         }
     }
 
@@ -121,6 +125,7 @@ impl SteckerWebRTCConnection {
         Ok(self.peer_connection.close().await?)
     }
 
+    #[instrument(skip_all)]
     fn connect_channel(
         data_channel: Arc<RTCDataChannel>,
         stecker_channel: Arc<SteckerDataChannel>,
@@ -131,44 +136,49 @@ impl SteckerWebRTCConnection {
         let data_channel2 = data_channel.clone();
 
         data_channel.on_close(Box::new(move || {
-            println!("Data channel closed");
+            info!("Data channel closed");
             let _ = stecker_channel.close.send(());
             Box::pin(async {})
         }));
 
+        let span = Span::current();
+
         data_channel.on_open(Box::new(move || {
-            Box::pin(async move {
-                let mut outbound_msg_rx = stecker_channel2.outbound.subscribe();
-                let mut close_rx = stecker_channel2.close.subscribe();
+            Box::pin(
+                async move {
+                    let mut outbound_msg_rx = stecker_channel2.outbound.subscribe();
+                    let mut close_rx = stecker_channel2.close.subscribe();
 
-                let mut _result = anyhow::Result::<usize>::Ok(0);
+                    let mut _result = anyhow::Result::<usize>::Ok(0);
 
-                loop {
-                    tokio::select! {
-                        msg_to_send = outbound_msg_rx.recv() => {
-                            match msg_to_send {
-                                Ok(msg) => {
-                                    // println!("Send out message: {msg}");
-                                    let _ = data_channel2.send(&msg.encode().unwrap()).await;
-                                },
-                                Err(err) => {
-                                    // @todo we consume the queue as much as possible
-                                    // this should be handled differently?
-                                    while outbound_msg_rx.len() > 0 {
-                                        let _ = outbound_msg_rx.recv().await;
-                                    }
-                                    println!("Got a lagging error: {err}");
-                                },
-                            };
-                        },
-                        _ = close_rx.recv() => {
-                            println!("Received closing trigger");
-                            break
+                    loop {
+                        tokio::select! {
+                            msg_to_send = outbound_msg_rx.recv() => {
+                                match msg_to_send {
+                                    Ok(msg) => {
+                                        trace!(?msg, "Send out message");
+                                        let _ = data_channel2.send(&msg.encode().unwrap()).await;
+                                    },
+                                    Err(_) => {
+                                        // @todo we consume the queue as much as possible
+                                        // this should be handled differently?
+                                        while outbound_msg_rx.len() > 0 {
+                                            let _ = outbound_msg_rx.recv().await;
+                                        }
+                                        warn!("Got a lagging error");
+                                    },
+                                };
+                            },
+                            _ = close_rx.recv() => {
+                                info!("Received closing trigger");
+                                break
+                            }
                         }
                     }
+                    info!("Stopped further consumption of the data channel");
                 }
-                println!("Stopped further consumption of the data channel");
-            })
+                .instrument(span),
+            )
         }));
 
         data_channel.on_message(Box::new(move |message: DataChannelMessage| {
@@ -205,21 +215,26 @@ impl SteckerWebRTCConnection {
     // other party builds data channel and we listen for it
     // should only be called once.
     pub async fn start_listening_for_data_channel(&self) {
+        let span = Span::current().clone();
+
         let map = self.data_channel_map.clone();
-        self.peer_connection
+        let _ = self
+            .peer_connection
             .on_data_channel(Box::new(move |d: Arc<RTCDataChannel>| {
-                // println!("Successfully listened for channel {}", d.label());
-                if let Some(stecker_channel) = map.lock().unwrap().get(d.label()) {
-                    let channel_type = stecker_channel.channel_type.clone();
-                    Self::connect_channel(d, stecker_channel, channel_type);
-                    Box::pin(async {})
-                } else {
-                    println!(
-                        "Ignore data channel '{}' because label is not registered.",
-                        d.label()
-                    );
-                    Box::pin(async {})
-                }
+                span.in_scope(|| {
+                    info!(label = d.label(), "Successfully listened for a channel");
+
+                    if let Some(stecker_channel) = map.lock().unwrap().get(d.label()) {
+                        let channel_type = stecker_channel.channel_type.clone();
+                        Self::connect_channel(d, stecker_channel, channel_type);
+                    } else {
+                        warn!(
+                            label = d.label(),
+                            "Ignore data channel because label is not registered."
+                        );
+                    }
+                });
+                Box::pin(async {})
             }));
     }
 

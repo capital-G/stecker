@@ -47,7 +47,8 @@ async fn main() {
 
     let filter = filter::Targets::new()
         .with_default(Level::ERROR)
-        .with_target("server", Level::TRACE);
+        .with_target("server", Level::TRACE)
+        .with_target("shared", Level::TRACE);
 
     tracing_subscriber::registry()
         .with(tracing_subscriber::fmt::layer())

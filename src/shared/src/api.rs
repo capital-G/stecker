@@ -6,6 +6,7 @@ use anyhow::bail;
 use reqwest::StatusCode;
 use serde::Deserialize;
 use serde_json::json;
+use tracing::{error, info, instrument};
 use webrtc::peer_connection::sdp::session_description::RTCSessionDescription;
 
 #[derive(Deserialize, Debug)]
@@ -51,6 +52,7 @@ impl Into<String> for &SteckerAPIRoomType {
 }
 
 impl APIClient {
+    #[instrument(skip_all, err)]
     pub async fn create_room(
         &self,
         name: &str,
@@ -82,7 +84,7 @@ impl APIClient {
 
         match json {
             Ok(result) => {
-                println!("Response from server: {result:?}");
+                info!(result.data.create_room, "Response from server");
                 let desc_data = decode_b64(result.data.create_room.as_str())?;
                 let answer = serde_json::from_str::<RTCSessionDescription>(&desc_data)?;
                 return Ok(answer);
@@ -93,6 +95,7 @@ impl APIClient {
         }
     }
 
+    #[instrument(skip_all, err)]
     pub async fn join_room(
         &self,
         name: &str,
@@ -131,7 +134,7 @@ impl APIClient {
                 Ok(answer)
             }
             Err(err) => {
-                println!("ERR joinRoom response: {err}\n{text}");
+                error!(response = text, "Failed to join room");
                 Err(err.into())
             }
         }

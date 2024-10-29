@@ -60,7 +60,9 @@ impl Mutation {
         let name2 = name.clone();
         match room_type {
             RoomType::Float | RoomType::Chat => {
-                let result = DataBroadcastRoom::create_room(name, offer, room_type.into()).await?;
+                let result = DataBroadcastRoom::create_room(name, offer, room_type.into())
+                    .instrument(Span::current())
+                    .await?;
                 {
                     let mut room_lock = match room_type {
                         RoomType::Float => {
@@ -82,7 +84,9 @@ impl Mutation {
                 Ok(result.offer)
             }
             RoomType::Audio => {
-                let result = AudioBroadcastRoom::create_room(name, offer).await?;
+                let result = AudioBroadcastRoom::create_room(name, offer)
+                    .instrument(Span::current())
+                    .await?;
                 {
                     let mut room_lock = match room_type {
                         RoomType::Audio => state.audio_rooms.map.lock().await,
