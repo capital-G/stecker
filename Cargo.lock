@@ -2532,6 +2532,8 @@ dependencies = [
  "ringbuf",
  "shared",
  "tokio",
+ "tracing",
+ "tracing-subscriber",
  "webrtc",
 ]
 

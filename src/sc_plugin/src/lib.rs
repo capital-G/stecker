@@ -15,7 +15,26 @@ use shared::{
     connections::SteckerWebRTCConnection,
     models::{DataRoomInternalType, SteckerData},
 };
+use tracing::{error, info, info_span, instrument, span, trace, Instrument, Level};
+use tracing_subscriber::fmt::format::FmtSpan;
+use tracing_subscriber::layer::SubscriberExt;
+use tracing_subscriber::util::SubscriberInitExt;
+use tracing_subscriber::{self, filter, fmt};
+
 use webrtc::media::Sample;
+
+fn setup_tracing() {
+    let filter = filter::Targets::new()
+        .with_default(Level::ERROR)
+        .with_target("stecker_sc", Level::TRACE)
+        .with_target("shared", Level::TRACE);
+
+    let formatter = fmt::layer().with_ansi(false).compact();
+
+    let subscriber = tracing_subscriber::registry().with(formatter).with(filter);
+
+    let _ = subscriber.try_init();
+}
 
 pub struct DataRoom {
     name: String,
@@ -29,8 +48,12 @@ pub struct DataRoom {
 
 impl DataRoom {
     pub fn join_room(name: &str, host: &str) -> Self {
+        setup_tracing();
         let name2 = String::from_str(name).unwrap();
         let host2 = host.to_owned();
+
+        let span = info_span!("join_data_room", room_name = name2);
+        let span2 = span.clone();
 
         let (sender, _) = broadcast::channel::<f32>(1024);
         let sender2 = sender.clone();
@@ -41,6 +64,7 @@ impl DataRoom {
         thread::spawn(move || {
             let rt = Runtime::new().unwrap();
             rt.block_on(async {
+                let _guard = span.enter();
                 let connection = SteckerWebRTCConnection::build_connection().await.unwrap();
                 let stecker_data_channel = connection
                     .create_data_channel(&DataRoomInternalType::Float)
@@ -63,6 +87,7 @@ impl DataRoom {
                     .await
                 {
                     Ok(answer) => {
+                        let _guard = span2.enter();
                         connection.set_remote_description(answer).await.unwrap();
 
                         let mut inbound_receiver = stecker_data_channel.inbound.clone().subscribe();
@@ -76,31 +101,31 @@ impl DataRoom {
                                     if let Ok(SteckerData::F32(m)) = msg {
                                         let _ = sender.send(m);
                                     } else {
-                                        println!("Error on forwarding message to webrtc");
+                                        error!("Error on forwarding message to webrtc");
                                     }
                                 },
                                 meta_msg = meta_receiver.recv() => {
                                     if let Ok(SteckerData::String(m)) = meta_msg {
-                                        println!("META: {m}");
+                                        info!(message=m, "New meta message");
                                     } else {
-                                        println!("Error on receiving meta message")
+                                        error!("Error on receiving meta message")
                                     }
                                 }
                                 _ = webrtc_close_receiver.recv() => {
-                                    println!("received webrtc close signal!");
+                                    trace!("received webrtc close signal!");
                                     break
                                 }
                                 _ = sc_close_receiver.recv() => {
-                                    println!("Received supercollider close signal");
+                                    trace!("Received supercollider close signal");
                                     break
                                 }
                             }
                         }
                         connection.close().await.unwrap();
-                        println!("Close connection now");
+                        info!("Close connection now");
                     }
                     Err(err) => {
-                        println!("Some error joining room {err}");
+                        error!(?err, "Failed to join room");
                     }
                 }
             });
@@ -118,8 +143,12 @@ impl DataRoom {
     }
 
     pub fn create_room(name: &str, host: &str) -> Self {
+        setup_tracing();
         let name2 = String::from_str(name).unwrap();
         let host2 = host.to_owned();
+
+        let span = info_span!("create_data_room", room_name = name2);
+        let span2 = span.clone();
 
         let (sender, mut receiver) = broadcast::channel::<f32>(1024);
         let sender2 = sender.clone();
@@ -131,6 +160,7 @@ impl DataRoom {
         thread::spawn(move || {
             let rt = Runtime::new().unwrap();
             rt.block_on(async {
+                let _guard = span.enter();
                 let connection = SteckerWebRTCConnection::build_connection().await?;
                 let stecker_data_channel = connection
                     .create_data_channel(&DataRoomInternalType::Float)
@@ -138,6 +168,7 @@ impl DataRoom {
                 let offer = connection.create_offer().await?;
 
                 tokio::spawn(async move {
+                    let _guard = span2.enter();
                     let mut webrtc_close_receiver = stecker_data_channel.close.clone().subscribe();
                     loop {
                         tokio::select! {
@@ -147,18 +178,18 @@ impl DataRoom {
                                         let _ = stecker_data_channel.outbound.send(SteckerData::F32(msg));
                                     },
                                     Err(err) => {
-                                        println!("Got an error while pushing messages out: {err}");
+                                        error!("Got an error while pushing messages out: {err}");
                                         break
                                     },
                                 }
                             },
                             _ = webrtc_close_receiver.recv() => {
-                                println!("Received stop signal from webrtc on pushing values to WebRTC");
+                                trace!("Received stop signal from webrtc on pushing values to WebRTC");
                                 break
                             },
                         };
                     }
-                    println!("Stopped forwarding messages from SC to WebRTC");
+                    info!("Stopped forwarding messages from SC to WebRTC");
                 });
 
                 let api_client = APIClient::new(host2);
@@ -170,7 +201,7 @@ impl DataRoom {
                         // @todo wait for actual stop signal here
                         let _ = sc_close_receiver.recv().await;
 
-                        println!("Close connection now");
+                        trace!("Close connection now");
                         connection.close().await?;
                         Ok(())
                     }
@@ -203,7 +234,7 @@ impl DataRoom {
                     self.last_value = msg;
                 }
                 Err(err) => {
-                    println!("Got an error while receiving values: {err}");
+                    error!(error=?err, "Got an error while receiving values");
                 }
             }
         };
@@ -223,9 +254,15 @@ pub struct AudioRoomSender {
 }
 
 impl AudioRoomSender {
+    #[instrument]
     pub fn create_room(name: &str, host: &str) -> Self {
+        setup_tracing();
         let name2 = name.to_owned();
         let host2 = host.to_owned();
+
+        let span = info_span!("create_audio_room", room_name = name2);
+        let span2 = span.clone();
+        let span3 = span.clone();
 
         // @todo make this configurable?
         // 20 ms
@@ -243,41 +280,45 @@ impl AudioRoomSender {
         thread::spawn(move || {
             let rt = Runtime::new().unwrap();
             rt.block_on(async {
+                let _guard = span.enter();
                 let connection = SteckerWebRTCConnection::build_connection().await?;
                 let audio_track = connection.create_audio_channel().await?;
                 let meta_channel = connection.create_data_channel(&DataRoomInternalType::Meta).await?;
                 let mut meta_recv = meta_channel.inbound.subscribe();
                 let offer = connection.create_offer().await?;
 
-                println!("Our base64 offer is: {offer}");
+                trace!(offer=offer, "Generated base64 encoded offer");
 
                 // consume meta messages
                 tokio::spawn(async move {
+                    let _guard = span2.enter();
                     let mut webrtc_close_receiver = meta_channel.close.clone().subscribe();
                     loop {
                         tokio::select! {
                             meta_msg = meta_recv.recv() =>{
                                 if let Ok(msg) = meta_msg {
-                                    println!("META: {msg}");
+                                    info!(message=?msg, "Received meta message");
                                 }
                             },
                             _ = webrtc_close_receiver.recv() => {
-                                println!("Received stop signal from webrtc on pushing values to WebRTC");
+                                trace!("Received stop signal from webrtc on pushing values to WebRTC");
                                 break
                             },
                         };
                     }
-                    println!("Stopped forwarding messages from SC to WebRTC");
+                    info!("Stopped forwarding messages from SC to WebRTC");
                 });
 
                 // thread to push values to server
                 tokio::spawn(async move {
+                    let _guard = span3.enter();
                     let mut opus_encoder = OpusEncoder::new(
                         sample_rate.into(),
                         OpusChannels::Mono,
                         opus::Application::Audio
                     ).expect("Could not init the opus encoder :O");
                     let _ = opus_encoder.set_bitrate(opus::Bitrate::Bits(96000));
+                    info!("Start encoding");
                     // let _ = opus_encoder.set_vbr(true);
                     // let mut opus_buffer = vec![0; FRAME_SIZE];
                     let mut raw_signal_buffer = [0.0f32; FRAME_SIZE];
@@ -298,15 +339,15 @@ impl AudioRoomSender {
                                         ..Default::default()
                                     }).await;
                                     if let Err(err) = result {
-                                        println!("Failed to write opus sample to the track: {err}");
+                                        error!(error=?err, "Failed to write opus sample to the track");
                                     }
                                 },
                                 Err(err) => {
-                                    println!("Failed to encode to opus: {err}");
+                                    error!(error=?err, "Failed to encode to opus frame.");
                                 },
                             }
                         } else {
-                            println!("Not enough values in ringbuf yet :O");
+                            error!("Not enough values in ringbuf yet!");
                         }
                     }
                 });
@@ -320,19 +361,17 @@ impl AudioRoomSender {
                         // // @todo wait for actual stop signal here
                         let _ = sc_close_receiver.recv().await;
 
-                        // println!("Close connection now");
-                        // connection.close().await?;
                         Ok(())
                     }
                     Err(err) => {
-                        println!("Failed to create audio room on server: {err}");
+                        error!(error=?err, "Failed to create audio room on server.");
                         Err(err)
                     },
                 }
             })
         });
 
-        println!("Created the audio sender :O");
+        trace!("Created the audio sender");
 
         return AudioRoomSender {
             name: name.to_owned(),
@@ -354,10 +393,15 @@ pub struct AudioRoomReceiver {
 
 impl AudioRoomReceiver {
     pub fn create_room(name: &str, host: &str, buffer_length: i32) -> Self {
+        setup_tracing();
         // @todo we are assuming 48khz
         let name2 = name.to_owned();
         let name3 = name.to_owned();
         let host2 = host.to_owned();
+
+        let span = info_span!("join_audio_room", room_name = name2);
+        let span2 = span.clone();
+        let span3 = span.clone();
 
         // @todo calculate the minimum needed size
         let ring_buffer = HeapRb::<f32>::new(24000);
@@ -369,6 +413,7 @@ impl AudioRoomReceiver {
         thread::spawn(move || {
             let rt = Runtime::new().unwrap();
             rt.block_on(async {
+                let _guard = span.enter();
                 let connection = SteckerWebRTCConnection::build_connection().await?;
                 // let audio_track = connection.listen_for_audio_channel().await?;
                 let meta_channel = connection.create_data_channel(&DataRoomInternalType::Meta).await?;
@@ -376,37 +421,39 @@ impl AudioRoomReceiver {
                 let mut audio_track_receiver = connection.listen_for_remote_audio_track().await;
                 let offer = connection.create_offer().await?;
 
-                println!("Our base64 offer is: {offer}");
+                trace!(offer=offer, "Generated base64 offer.");
 
                 // consume meta messages
                 tokio::spawn(async move {
+                    let _guard = span2.enter();
                     let mut webrtc_close_receiver = meta_channel.close.clone().subscribe();
                     loop {
                         tokio::select! {
                             meta_msg = meta_recv.recv() =>{
                                 if let Ok(msg) = meta_msg {
-                                    println!("META: {msg}");
+                                    info!(message=?msg, "Received meta message");
                                 }
                             },
                             _ = webrtc_close_receiver.recv() => {
-                                println!("Received stop signal from webrtc on pushing values to WebRTC");
+                                trace!("Received stop signal from webrtc on pushing values to WebRTC");
                                 break
                             },
                         };
                     }
-                    println!("Stopped forwarding messages from SC to WebRTC");
+                    info!("Stopped forwarding messages from SC to WebRTC");
                 });
 
                 tokio::spawn(async move {
+                    let _guard = span3.enter();
                     let mut opus_decoder = OpusDecoder::new(48000, OpusChannels::Mono).expect("Could not init the opus decoder");
 
                     // max size from https://opus-codec.org/docs/opus_api-1.2/group__opus__decoder.html#ga9c554b8c0214e24733a299fe53bb3bd2
                     let mut raw_signal_buffer: Vec<f32> = vec![0.0; 5760];
-                    println!("Wait for audio track to be received");
+                    trace!("Wait for audio track to be received");
 
                         let received_audio_track = audio_track_receiver.recv().await.clone().unwrap();
 
-                        println!("Found some track! Start decoding");
+                        info!("Found an track! Start decoding");
 
                         while let Ok((rtp, _)) = received_audio_track.read_rtp().await {
                             match opus_decoder.decode_float(&*rtp.payload, &mut raw_signal_buffer, false) {
@@ -415,7 +462,7 @@ impl AudioRoomReceiver {
                                     producer.push_slice(&raw_signal_buffer[..opus_samples]);
                                 },
                                 Err(err) => {
-                                    println!("Error decoding opus frame: {:?}", err);
+                                    error!(error=?err, "Error decoding opus frame");
                                 },
                             }
                         }
@@ -425,17 +472,17 @@ impl AudioRoomReceiver {
 
                 match api_client.join_room(&name2, &shared::models::SteckerAPIRoomType::Audio, &offer).await {
                     Ok(answer) => {
-                        println!("Received remote offer");
+                        trace!("Received remote offer");
                         let _ = connection.set_remote_description(answer).await.expect("Could not set remote description!");
 
                         // // @todo wait for actual stop signal here
                         let _ = sc_close_receiver.recv().await;
 
-                        println!("Close connection now");
+                        info!("Close connection now");
                         Ok(())
                     }
                     Err(err) => {
-                        println!("Failed to create audio room on server: {err}");
+                        error!(error=?err, "Failed to create audio room on server");
                         Err(err)
                     },
                 }

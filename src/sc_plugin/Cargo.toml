@@ -12,6 +12,8 @@ opus = "0.3.0"
 ringbuf = "0.4.1"
 webrtc = "0.10.1"
 bytes = "1.7.1"
+tracing = "0.1.40"
+tracing-subscriber = {version="0.3.18", features = ["default", "std"]}
 
 [build-dependencies]
 cxx-build = "1.0"
