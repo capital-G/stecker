@@ -14,13 +14,13 @@ impl AppState {
     pub fn new() -> Self {
         Self {
             float_rooms: RoomMap {
-                map: Mutex::new(HashMap::new()),
+                map: Arc::new(Mutex::new(HashMap::new())),
             },
             chat_rooms: RoomMap {
-                map: Mutex::new(HashMap::new()),
+                map: Arc::new(Mutex::new(HashMap::new())),
             },
             audio_rooms: RoomMap {
-                map: Mutex::new(HashMap::new()),
+                map: Arc::new(Mutex::new(HashMap::new())),
             },
         }
     }
@@ -41,7 +41,7 @@ impl AppState {
 }
 
 pub struct RoomMap {
-    pub map: Mutex<HashMap<String, Arc<Mutex<BroadcastRoom>>>>,
+    pub map: Arc<Mutex<HashMap<String, Arc<Mutex<BroadcastRoom>>>>>,
 }
 
 pub trait RoomMapTrait {

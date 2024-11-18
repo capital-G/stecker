@@ -7,7 +7,7 @@ use crate::utils::{decode_b64, encode_offer};
 use anyhow::anyhow;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
-use tokio::sync::broadcast::Receiver;
+use tokio::sync::broadcast::{self, Receiver, Sender};
 use tracing::{
     error_span, info, info_span, instrument, span, trace, trace_span, warn, Instrument, Span,
 };
@@ -16,6 +16,7 @@ use webrtc::api::media_engine::{MediaEngine, MIME_TYPE_OPUS};
 use webrtc::api::APIBuilder;
 use webrtc::data_channel::data_channel_message::DataChannelMessage;
 use webrtc::data_channel::RTCDataChannel;
+use webrtc::ice_transport::ice_connection_state::RTCIceConnectionState;
 use webrtc::ice_transport::ice_server::RTCIceServer;
 use webrtc::interceptor::registry::Registry;
 use webrtc::peer_connection::configuration::RTCConfiguration;
@@ -29,9 +30,11 @@ use webrtc::track::track_remote::TrackRemote;
 pub struct SteckerWebRTCConnection {
     peer_connection: RTCPeerConnection,
     data_channel_map: Arc<Mutex<DataChannelMap>>,
+    pub connection_closed: Sender<()>,
 }
 
 impl SteckerWebRTCConnection {
+    #[instrument]
     pub async fn build_connection() -> anyhow::Result<Self> {
         let mut m = MediaEngine::default();
         m.register_default_codecs()?;
@@ -52,8 +55,34 @@ impl SteckerWebRTCConnection {
             ..Default::default()
         };
 
+        let peer_connection = api.new_peer_connection(config).await?;
+
+        let (connection_closed, _) = broadcast::channel::<()>(1);
+        let connection_closed2 = connection_closed.clone();
+
+        let span = Span::current();
+        peer_connection.on_ice_connection_state_change(Box::new(move |state| {
+            let connection_closed3 = connection_closed.clone();
+            let span2 = span.clone();
+            Box::pin(
+                async move {
+                    match state {
+                        RTCIceConnectionState::Disconnected => {
+                            info!("Connection closed");
+                            let _ = connection_closed3.send(());
+                        }
+                        state => {
+                            trace!(?state, "New connection state");
+                        }
+                    }
+                }
+                .instrument(span2),
+            )
+        }));
+
         Ok(Self {
-            peer_connection: api.new_peer_connection(config).await?,
+            peer_connection,
+            connection_closed: connection_closed2,
             data_channel_map: Arc::new(Mutex::new(DataChannelMap(Mutex::new(HashMap::new())))),
         })
     }

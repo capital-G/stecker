@@ -85,7 +85,7 @@ impl Mutation {
             }
             RoomType::Audio => {
                 let result = AudioBroadcastRoom::create_room(name, offer)
-                    .instrument(Span::current())
+                    .in_current_span()
                     .await?;
                 {
                     let mut room_lock = match room_type {
@@ -97,9 +97,24 @@ impl Mutation {
                     let room_mutex = Arc::new(Mutex::new(BroadcastRoom::Audio(
                         result.audio_broadcast_room,
                     )));
+                    let name3 = name2.clone();
                     room_lock.insert(name2, room_mutex.clone());
+
+                    let audio_room_mutex = state.audio_rooms.map.clone();
+
+                    let close_recv = result.disconnected.clone();
+                    tokio::spawn(
+                        async move {
+                            let _ = close_recv.subscribe().recv().await;
+                            let mut audio_room_mutex_lock = audio_room_mutex.lock().await;
+                            audio_room_mutex_lock.remove(&name3);
+                            info!("Cleared room");
+                        }
+                        .in_current_span(),
+                    );
                 }
                 info!("Created an audio room");
+
                 Ok(result.offer)
             }
         }

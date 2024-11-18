@@ -312,6 +312,7 @@ pub struct AudioBroadcastRoom {
 pub struct AudioBroadcastRoomWithOffer {
     pub audio_broadcast_room: AudioBroadcastRoom,
     pub offer: String,
+    pub disconnected: Sender<()>,
 }
 
 impl AudioBroadcastRoom {
@@ -319,16 +320,22 @@ impl AudioBroadcastRoom {
         name: String,
         offer: String,
     ) -> anyhow::Result<AudioBroadcastRoomWithOffer> {
-        let connection = SteckerWebRTCConnection::build_connection().await?;
+        let connection = SteckerWebRTCConnection::build_connection()
+            .in_current_span()
+            .await?;
         // let audio_channel = connection.listen_for_audio_channel().await?;
         let audio_channel = SteckerAudioChannel::create_channels();
-        let mut audio_track_receiver = connection.listen_for_remote_audio_track().await;
+        let mut audio_track_receiver = connection
+            .listen_for_remote_audio_track()
+            .in_current_span()
+            .await;
         let meta_channel = connection.register_channel(&DataRoomInternalType::Meta);
         let (num_listeners_sender, num_listeners_receiver) = tokio::sync::watch::channel(0);
-        let response_offer = connection.respond_to_offer(offer).await?;
+        let response_offer = connection.respond_to_offer(offer).in_current_span().await?;
 
         let audio_channel_tx = audio_channel.audio_channel_tx.clone();
-        let close_tx = audio_channel.close.clone();
+        let disconnected = connection.connection_closed.clone();
+
         tokio::spawn(async move {
             let track = audio_track_receiver.recv().await.unwrap();
             let local_track = Arc::new(TrackLocalStaticRTP::new(
@@ -344,13 +351,11 @@ impl AudioBroadcastRoom {
             while let Ok((rtp, _)) = track.read_rtp().await {
                 let _ = local_track.write_rtp(&rtp).await;
             }
-
-            info!("Nothing to transmit anymore - closing time.");
-            let _ = close_tx.send(());
         });
 
         return Ok(AudioBroadcastRoomWithOffer {
             offer: response_offer,
+            disconnected,
             audio_broadcast_room: Self {
                 stecker_audio_channel: audio_channel,
                 meta: BroadcastRoomMeta {
