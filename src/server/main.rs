@@ -6,6 +6,7 @@ use std::path::PathBuf;
 
 use crate::schema::{Mutation, Query};
 
+use async_graphql::extensions::Tracing;
 use async_graphql::{http::GraphiQLSource, EmptySubscription, Schema};
 use async_graphql_axum::GraphQL;
 use axum::{
@@ -17,6 +18,10 @@ use clap::Parser;
 use state::AppState;
 use tokio::net::TcpListener;
 use tower_http::services::ServeDir;
+use tracing::Level;
+use tracing_subscriber::layer::SubscriberExt;
+use tracing_subscriber::util::SubscriberInitExt;
+use tracing_subscriber::{self, filter};
 
 const LOCAL_HOST: &str = "127.0.0.1";
 
@@ -40,8 +45,19 @@ async fn graphiql() -> impl IntoResponse {
 async fn main() {
     let args = Cli::parse();
 
+    let filter = filter::Targets::new()
+        .with_default(Level::ERROR)
+        .with_target("server", Level::TRACE)
+        .with_target("shared", Level::TRACE);
+
+    tracing_subscriber::registry()
+        .with(tracing_subscriber::fmt::layer())
+        .with(filter)
+        .init();
+
     let schema = Schema::build(Query, Mutation, EmptySubscription)
         .data(AppState::new())
+        .extension(Tracing)
         .finish();
 
     let app = Router::new()

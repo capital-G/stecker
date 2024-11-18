@@ -100,7 +100,7 @@ impl SteckerDataChannel {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum SteckerData {
     F32(f32),
     String(String),
