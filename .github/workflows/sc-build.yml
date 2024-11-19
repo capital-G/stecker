@@ -32,9 +32,9 @@ jobs:
         SC_SRC_PATH=$GITHUB_WORKSPACE/supercollider cmake --preset ${{ matrix.cmake-preset }}
         cmake --build build --target install
     - name: create archive
-      run: cd install && zip --symlinks -r ${{ matrix.cmake-preset }}.zip .
+      run: zip -r archive.zip src/sc_plugin/install/
     - name: upload artifacts
       uses: actions/upload-artifact@v4
       with:
         name: superstecker_sc_${{  matrix.cmake-preset }}
-        path: install/${{ matrix.cmake-preset }}.zip
+        path: archive.zip
