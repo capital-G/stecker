@@ -14,7 +14,7 @@ jobs:
       matrix:
         include:
           - os: ubuntu-latest
-            cmake-preset: linux
+            cmake-preset: Linux
           - os: macos-latest
             cmake-preset: macOS
     runs-on: ${{ matrix.os }}
