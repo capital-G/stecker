@@ -29,7 +29,7 @@ jobs:
     - name: Build Plugin
       run: |
         cd src/sc_plugin
-        SC_SRC_PATH=$GITHUB_WORKSPACE/supercollider cmake configure --preset ${{ matrix.cmake-preset }}
+        SC_SRC_PATH=$GITHUB_WORKSPACE/supercollider cmake --preset ${{ matrix.cmake-preset }}
         cmake --build build --target install
     - name: create archive
       run: cd install && zip --symlinks -r ${{ matrix.cmake-preset }}.zip .
