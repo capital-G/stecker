@@ -9,7 +9,7 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  example_matrix:
+  plugin_matrix:
     strategy:
       matrix:
         include:
@@ -27,7 +27,7 @@ jobs:
         ref: "main"
         path: "supercollider"
     - name: Build Plugin
-      run:
+      run: |
         cd src/sc_plugin
         SC_SRC_PATH=$GITHUB_WORKSPACE/supercollider make configure --preset ${{ matrix.cmake-preset }}
         cmake --build build --target install
