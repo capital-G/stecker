@@ -1,0 +1,28 @@
+TITLE:: SteckerIn
+summary:: Receive audio via WebRTC
+categories:: Libraries>Stecker, UGens>InOut
+related:: Classes/SteckerOut, Classes/DataSteckerOut, Guides/Stecker/SuperStecker
+
+DESCRIPTION::
+Receives the mono audio signal of a room on a Stecker server.
+
+code::
+{SteckerIn.ar(roomName: \myRoom, host: ~myHost)}.play
+::
+
+CLASSMETHODS::
+
+PRIVATE:: new1
+
+METHOD:: ar
+Receives the mono audio signal of a room on a Stecker server.
+If there exists no room with the given name or the server is not reachable an error message will be printed and the UGen will return a silent signal.
+argument:: roomName
+A link::Classes/String:: or link::Classes/Symbol:: of the name of the room to join.
+argument:: host
+A link::Classes/String:: or link::Classes/Symbol:: of the address of the host to use.
+No need to prepend TELETYPE::http:: in front of it, TELETYPE::stecker.myhost.org:: is sufficient.
+
+INSTANCEMETHODS::
+
+PRIVATE:: checkInputs

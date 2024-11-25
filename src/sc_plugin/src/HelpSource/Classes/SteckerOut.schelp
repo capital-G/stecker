@@ -1,0 +1,32 @@
+TITLE:: SteckerOut
+summary:: Send audio via WebRTC
+categories:: Libraries>Stecker, UGens>InOut
+related:: Classes/SteckerIn, Classes/DataSteckerIn, Guides/Stecker/SuperStecker
+
+DESCRIPTION::
+Publishes a mono signal as a room on a Stecker server so other people can listen and access the signal via the room.
+
+code::
+{SteckerOut.ar(input: Gendy2.ar, roomName: \myRoom, host: ~myHost)}.play
+::
+
+CLASSMETHODS::
+
+PRIVATE:: new1
+
+METHOD:: ar
+Publishes a mono signal as a room on a Stecker server so other people can listen and access the signal via the room.
+argument:: input
+The audio signal to be send to the room.
+This must be a single channel audio signal.
+The UGen acts as an identity, so it will return its input signal.
+argument:: roomName
+A link::Classes/String:: or link::Classes/Symbol:: of the name of the room to create.
+argument:: host
+A link::Classes/String:: or link::Classes/Symbol:: of the address of the host to use.
+No need to prepend TELETYPE::http:: in front of it, TELETYPE::stecker.myhost.org:: is sufficient.
+If the server is not accessible, the UGen will print an error.
+
+INSTANCEMETHODS::
+
+PRIVATE:: checkInputs

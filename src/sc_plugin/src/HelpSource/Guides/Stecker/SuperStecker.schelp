@@ -1,0 +1,29 @@
+TITLE::Introduction to Stecker
+summary:: How to stream audio and control signals via the internet
+categories:: Libraries>Stecker, Guides
+related:: Classes/SteckerOut, Classes/SteckerIn, Classes/DataSteckerIn, Classes/DataSteckerOut
+
+DESCRIPTION::
+
+Stecker is a framework to send and receive audio or control signals via the internet using WebRTC, where EMPHASIS::SuperStecker:: consists of the SuperCollider UGens in order to connect to a Stecker server.
+
+The audio or control signal can be transmitted or received from another SuperCollider instance with Stecker installed or from any device having a modern browser via the Stecker server website.
+
+WebRTC offers low latency and ways to establish a connection even in more restricted networks and is also the foundation of video conference services such as Jitsi.
+
+NOTE::
+During connection it is necessary to exchange the IP of the client with the IP of the server through a third party STUN server. Currently stecker relies on a STUN server owned by Google.
+Once the connection information has been exchanged through the STUN server there is no more data flowing through STUN server and a peer-to-peer connection between the local client and the Stecker server is used to exchange data.
+::
+
+SECTION:: Server
+
+Stecker uses a Server to distribute the audio signals to its Clients.
+The Server is not part of SuperStecker and can therefore not be started via a UGen and has to be started via a command line.
+For specifics refer to the Stecker repository.
+
+Currently the following public servers are availbale:
+
+LIST::
+## TELETYPE::stecker.dennis-scheiba.com::
+::

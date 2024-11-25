@@ -1,0 +1,30 @@
+TITLE:: DataSteckerOut
+summary:: Sends a control signal via WebRTC
+categories:: Libraries>Stecker, UGens>InOut
+related:: Classes/DataSteckerIn, Classes/SteckerOut, Guides/Stecker/SuperStecker
+
+DESCRIPTION::
+Sends a single channel control signal to a room on a Stecker server.
+
+code::
+{DataSteckerOut.kr(input: Gendy2.kr, roomName: \myRoom, host: ~myHost); Silent.ar}.play;
+::
+
+CLASSMETHODS::
+
+PRIVATE:: new1
+
+METHOD:: kr
+Receives a single channel control signal of a room on a Stecker server.
+If the server is not reachable an error message will be printed and the UGen will return TELETYPE::0.0::.
+argument:: input
+The signal to be send. Must be a single channel control signal.
+argument:: roomName
+A link::Classes/String:: or link::Classes/Symbol:: of the name of the room to create.
+argument:: host
+A link::Classes/String:: or link::Classes/Symbol:: of the address of the host to use.
+No need to prepend TELETYPE::http:: in front of it, TELETYPE::stecker.myhost.org:: is sufficient.
+
+INSTANCEMETHODS::
+
+PRIVATE:: checkInputs
