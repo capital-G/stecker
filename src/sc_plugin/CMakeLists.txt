@@ -50,4 +50,5 @@ endif()
 
 install(TARGETS SuperStecker LIBRARY DESTINATION ${PROJECT_NAME})
 install(FILES src/SuperStecker.sc DESTINATION ${PROJECT_NAME}/Classes)
+install(FILES src/SteckerBus.sc DESTINATION ${PROJECT_NAME}/Classes)
 install(DIRECTORY src/HelpSource DESTINATION ${PROJECT_NAME})
