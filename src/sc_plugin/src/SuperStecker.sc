@@ -1,5 +1,14 @@
+Stecker {
+	classvar <>host;
+
+	*initClass {
+		host = "https://stecker.dennis-scheiba.com";
+	}
+}
+
 DataSteckerIn : UGen {
-	*kr {|roomName, host="http://127.0.0.1:8000"|
+	*kr {|roomName, host=nil|
+		host = host ? Stecker.host;
 		^this.new1('control', roomName, host);
 	}
 
@@ -16,7 +25,8 @@ DataSteckerIn : UGen {
 }
 
 DataSteckerOut : UGen {
-	*kr {|input, roomName, host="http://127.0.0.1:8000"|
+	*kr {|input, roomName, host=nil|
+		host = host ? Stecker.host;
 		^this.new1('control', input, roomName, host);
 	}
 
@@ -33,7 +43,8 @@ DataSteckerOut : UGen {
 }
 
 SteckerIn : UGen {
-	*ar {|roomName, host="http://127.0.0.1:8000"|
+	*ar {|roomName, host=nil|
+		host = host ? Stecker.host;
 		^this.new1('audio', roomName, host);
 	}
 
@@ -50,7 +61,8 @@ SteckerIn : UGen {
 }
 
 SteckerOut : UGen {
-	*ar {|input, roomName, host="http://127.0.0.1:8000"|
+	*ar {|input, roomName, host=nil|
+		host = host ? Stecker.host;
 		^this.new1('audio', input, roomName, host);
 	}
 
