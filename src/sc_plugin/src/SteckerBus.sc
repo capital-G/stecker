@@ -1,23 +1,15 @@
 
-
-
-SteckerBus {
+AbstractStecker {
 
 	var <roomName, <hostName;
 	var <bus, <synth;
 	var <>graceTime = 3, <fresh = true;
 
-	classvar <>all;
-
-	*initClass {
-		all = IdentityDictionary.new;
-	}
-
 	*new { |roomName, input|
-		var steckerBus = all[roomName];
+		var steckerBus = this.all[roomName];
 		if(steckerBus.isNil) {
 			steckerBus = super.newCopyArgs(roomName);
-			all[roomName] = steckerBus
+			this.all[roomName] = steckerBus
 		};
 		if(input.notNil) {
 			steckerBus.checkRoom;
@@ -27,27 +19,11 @@ SteckerBus {
 		^steckerBus
 	}
 
-	*ar { |roomName, numChannels|
-		var room = this.newRunning(roomName);
-		if(room.bus.rate != \audio) {
-			Error("This is a control rate stecker bus, can't output audio rate").throw
-		};
-		^room.inputUGen(numChannels)
-	}
-
-	*kr { |roomName, numChannels|
-		var room = this.newRunning(roomName);
-		if(room.bus.rate != \control) {
-			Error("This is an audio rate stecker bus, can't output control rate").throw
-		};
-		^room.inputUGen(numChannels)
-	}
-
-	open { |host, rate, maxNumChannels = 1, server| // currently onyl works mono!
+	open { |host, maxNumChannels = 1, server| // currently onyl works mono!
 		if(hostName.notNil) { Error("There is already a room open.").throw };
 		if(maxNumChannels > 1) { Error("Only Mono For Now").throw };
 		hostName = host;
-		this.initBus(server ? Server.default, rate, maxNumChannels);
+		this.initBus(server ? Server.default, maxNumChannels);
 	}
 
 	close {
@@ -58,29 +34,7 @@ SteckerBus {
 
 	asUGenInput { ^0 }
 
-
 	// private interface
-
-	initBus { |server, rate, maxNumChannels|
-		if(server.serverRunning.not) { Error("Server not running.").throw };
-		bus = Bus.perform(rate, server, maxNumChannels);
-	}
-
-	synthFunc {
-		^if(bus.rate == \audio) {
-			{
-				var input = InFeedback.ar(bus.index, bus.numChannels);
-				SteckerOut.ar(input, roomName, hostName);
-				0.0
-			}
-		} {
-			{
-				var input = In.kr(bus.index, bus.numChannels);
-				DataSteckerOut.kr(input, roomName, hostName);
-				0.0
-			}
-		}
-	}
 
 	startSynth {
 		if(synth.isPlaying.not) {
@@ -99,23 +53,6 @@ SteckerBus {
 		^room
 	}
 
-	// this could become InBus
-	inputUGen { |numChannels|
-		^if(bus.rate == \audio) {
-			InFeedback.ar(bus.index, numChannels.min(bus.numChannels))
-		} {
-			In.kr(bus.index, numChannels.min(bus.numChannels))
-		}
-	}
-
-	outputUGen { |input|
-		^if(bus.rate == \audio) {
-			Out.ar(bus.index, input * EnvGate.new)
-		} {
-			Out.kr(bus.index, input * EnvGate.new)
-		}
-	}
-
 	checkRoom {
 		if(roomName.isNil or: hostName.isNil) { Error("Room not open.").throw };
 		if(UGen.buildSynthDef.isNil) { Error("Can only add an input inside a synth.").throw };
@@ -131,30 +68,114 @@ SteckerBus {
 		}
 	}
 
+
 }
+
+Stecker : AbstractStecker {
+
+	classvar <>all;
+
+	*initClass {
+		all = IdentityDictionary.new;
+	}
+
+	*ar { |roomName, numChannels|
+		var room = this.newRunning(roomName);
+		if(room.bus.rate != \audio) {
+			Error("This is a control rate stecker bus, can't output audio rate").throw
+		};
+		^room.inputUGen(numChannels)
+	}
+
+	initBus { |server, maxNumChannels|
+		if(server.serverRunning.not) { Error("Server not running.").throw };
+		bus = Bus.audio(server, maxNumChannels);
+	}
+
+	synthFunc {
+		^{
+			var input = InFeedback.ar(bus.index, bus.numChannels);
+			SteckerOut.ar(input, roomName, hostName);
+			0.0
+		}
+	}
+
+	// this could become InBus
+	inputUGen { |numChannels|
+		^InFeedback.ar(bus.index, numChannels.min(bus.numChannels))
+	}
+
+	outputUGen { |input|
+		^Out.ar(bus.index, input * EnvGate.new)
+	}
+
+}
+
+
+DataStecker : AbstractStecker {
+
+	classvar <>all;
+
+	*initClass {
+		all = IdentityDictionary.new;
+	}
+
+	*kr { |roomName, numChannels|
+		var room = this.newRunning(roomName);
+		if(room.bus.rate != \control) {
+			Error("This is an audio rate stecker bus, can't output control rate").throw
+		};
+		^room.inputUGen(numChannels)
+	}
+
+	initBus { |server, maxNumChannels|
+		if(server.serverRunning.not) { Error("Server not running.").throw };
+		bus = Bus.control(server, maxNumChannels);
+	}
+
+	synthFunc {
+		^{
+			var input = In.kr(bus.index, bus.numChannels);
+			DataSteckerOut.kr(input, roomName, hostName);
+			0.0
+		}
+	}
+
+	// this could become InBus
+	inputUGen { |numChannels|
+		^In.kr(bus.index, numChannels.min(bus.numChannels))
+	}
+
+	outputUGen { |input|
+		^Out.kr(bus.index, input * EnvGate.new)
+	}
+
+
+}
+
 
 
 
 /*
 
 
-SteckerBus(\test) === SteckerBus(\test)
+Stecker(\test) === Stecker(\test)
 
-SteckerBus(\test).open("http://stecker.dennis-scheiba.com", \audio, 1);
+Stecker(\test).open("http://stecker.dennis-scheiba.com", 1);
 
-SteckerBus(\test).bus
-SteckerBus(\test).startSynth;
+Stecker(\test).bus
+Stecker(\test).startSynth;
 
 (
 Ndef(\test1, {
-	SteckerBus(\test, SinOsc.ar(500) * 0.1);
+Stecker(\test, SinOsc.ar(500) * 0.1);
 });
 )
 
 (
 Ndef(\test2, {
-	SteckerBus(\test, Pulse.ar(120) * 0.1);
-	0
+Stecker(\test, Pulse.ar(120) * 0.1);
+0
 });
 )
 
@@ -163,10 +184,10 @@ Ndef(\test2).free
 
 (
 Ndef(\out, {
-	SteckerBus.ar(\test, 1)
+Stecker.ar(\test, 1)
 }).play;
 )
 
-SteckerBus(\test).close;
+Stecker(\test).close;
 
 */
