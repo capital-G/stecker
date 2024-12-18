@@ -14,17 +14,17 @@ SteckerBus {
 	}
 
 	*new { |roomName, input|
-		var res = all[roomName];
-		if(res.isNil) {
-			res = super.newCopyArgs(roomName);
-			all[roomName] = res
+		var steckerBus = all[roomName];
+		if(steckerBus.isNil) {
+			steckerBus = super.newCopyArgs(roomName);
+			all[roomName] = steckerBus
 		};
 		if(input.notNil) {
-			res.checkRoom;
-			res.startSynth;
-			res.outputUGen(input);
+			steckerBus.checkRoom;
+			steckerBus.startSynth;
+			steckerBus.outputUGen(input);
 		};
-		^res
+		^steckerBus
 	}
 
 	*ar { |roomName, numChannels|
@@ -55,6 +55,8 @@ SteckerBus {
 		synth.free;
 		bus.free;
 	}
+
+	asUGenInput { ^0 }
 
 
 	// private interface
@@ -146,7 +148,6 @@ SteckerBus(\test).startSynth;
 (
 Ndef(\test1, {
 	SteckerBus(\test, SinOsc.ar(500) * 0.1);
-	0
 });
 )
 
@@ -165,5 +166,7 @@ Ndef(\out, {
 	SteckerBus.ar(\test, 1)
 }).play;
 )
+
+SteckerBus(\test).close;
 
 */
