@@ -13,7 +13,7 @@
         {
             "name": "macOS",
             "inherits": "default",
-            "generator": "Xcode"
+            "generator": "Ninja"
         },
         {
             "name": "Linux",
