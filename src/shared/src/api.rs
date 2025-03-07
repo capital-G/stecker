@@ -16,8 +16,21 @@ struct GQLResponse<T> {
 
 #[derive(Deserialize, Debug)]
 #[serde(rename_all = "camelCase")]
-struct CreateRoomData {
-    create_room: String,
+struct CreateRoomDataRaw {
+    offer: String,
+    password: String,
+}
+
+// @todo remove this unecessary reply wrapper...
+#[derive(Deserialize, Debug)]
+#[serde(rename_all = "camelCase")]
+struct CreateRoomWrapper {
+    pub create_room: CreateRoomDataRaw,
+}
+
+pub struct CreateRoomResponse {
+    pub session_description: RTCSessionDescription,
+    pub password: String,
 }
 
 #[derive(Deserialize, Debug)]
@@ -58,10 +71,10 @@ impl APIClient {
         name: &str,
         room_type: &SteckerAPIRoomType,
         local_session_description: &str,
-    ) -> anyhow::Result<RTCSessionDescription> {
+    ) -> anyhow::Result<CreateRoomResponse> {
         let room_string: String = room_type.into();
         let query = json!({
-            "query": "mutation createRoom($name:String!, $offer:String!, $roomType: RoomType!) { createRoom(name:$name, offer:$offer, roomType:$roomType) }",
+            "query": "mutation createRoom($name:String!, $offer:String!, $roomType: RoomType!) { createRoom(name:$name, offer:$offer, roomType:$roomType) {offer, password} }",
             "variables": {
                 "name": name,
                 "offer": local_session_description,
@@ -79,15 +92,21 @@ impl APIClient {
             .await?;
 
         let text = res.text().await?;
-        let json: anyhow::Result<GQLResponse<CreateRoomData>> =
-            serde_json::from_str::<GQLResponse<CreateRoomData>>(&text).map_err(Into::into);
+        let json: anyhow::Result<GQLResponse<CreateRoomWrapper>> =
+            serde_json::from_str::<GQLResponse<CreateRoomWrapper>>(&text).map_err(Into::into);
 
         match json {
             Ok(result) => {
-                info!(result.data.create_room, "Response from server");
-                let desc_data = decode_b64(result.data.create_room.as_str())?;
+                info!(
+                    result.data.create_room.offer,
+                    result.data.create_room.password, "Response from server"
+                );
+                let desc_data = decode_b64(result.data.create_room.offer.as_str())?;
                 let answer = serde_json::from_str::<RTCSessionDescription>(&desc_data)?;
-                return Ok(answer);
+                return Ok(CreateRoomResponse {
+                    session_description: answer,
+                    password: result.data.create_room.password,
+                });
             }
             Err(err) => {
                 bail!("Received unexpected response from server: {err} - {text}");

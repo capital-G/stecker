@@ -118,7 +118,9 @@ async fn create_room(
     {
         Ok(answer) => {
             // Apply the answer as the remote description
-            connection.set_remote_description(answer).await?;
+            connection
+                .set_remote_description(answer.session_description)
+                .await?;
 
             println!("Press ctrl-c to stop");
 

@@ -1,9 +1,12 @@
 use std::sync::Arc;
 
 use crate::{
-    models::{AudioBroadcastRoom, BroadcastRoom, DataBroadcastRoom, Room, RoomType},
+    models::{
+        AudioBroadcastRoom, BroadcastRoom, DataBroadcastRoom, Room, RoomCreationReply, RoomType,
+    },
     state::RoomMapTrait,
 };
+use rand::distributions::{Alphanumeric, DistString};
 
 use anyhow::anyhow;
 use tokio::sync::Mutex;
@@ -47,9 +50,16 @@ impl Mutation {
         name: String,
         offer: String,
         room_type: RoomType,
-    ) -> anyhow::Result<String> {
+        password: Option<String>,
+    ) -> anyhow::Result<RoomCreationReply> {
         let connection_uuid = Uuid::new_v4();
         tracing::Span::current().record("connection_uuid", connection_uuid.to_string());
+
+        let used_password: String = if let Some(user_provided_password) = password {
+            user_provided_password
+        } else {
+            Alphanumeric.sample_string(&mut rand::thread_rng(), 8)
+        };
 
         let state = ctx.data_unchecked::<AppState>();
 
@@ -81,7 +91,10 @@ impl Mutation {
                         Arc::new(Mutex::new(BroadcastRoom::Data(result.broadcast_room)));
                     room_lock.insert(name2, room_mutex.clone());
                 }
-                Ok(result.offer)
+                Ok(RoomCreationReply {
+                    offer: result.offer,
+                    password: used_password,
+                })
             }
             RoomType::Audio => {
                 let result = AudioBroadcastRoom::create_room(name, offer)
@@ -115,7 +128,10 @@ impl Mutation {
                 }
                 info!("Created an audio room");
 
-                Ok(result.offer)
+                Ok(RoomCreationReply {
+                    offer: result.offer,
+                    password: used_password,
+                })
             }
         }
     }

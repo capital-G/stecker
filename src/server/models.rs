@@ -405,3 +405,9 @@ impl Into<RoomType> for DataRoomInternalType {
         }
     }
 }
+
+#[derive(SimpleObject, Clone)]
+pub struct RoomCreationReply {
+    pub offer: String,
+    pub password: String,
+}

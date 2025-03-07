@@ -196,7 +196,8 @@ impl DataRoom {
 
                 match api_client.create_room(&name2, &shared::models::SteckerAPIRoomType::Data(shared::models::DataRoomPublicType::Float), &offer).await {
                     Ok(answer) => {
-                        connection.set_remote_description(answer).await?;
+                        connection.set_remote_description(answer.session_description).await?;
+                        info!(answer.password, "Received server response");
 
                         // @todo wait for actual stop signal here
                         let _ = sc_close_receiver.recv().await;
@@ -356,7 +357,7 @@ impl AudioRoomSender {
 
                 match api_client.create_room(&name2, &shared::models::SteckerAPIRoomType::Audio, &offer).await {
                     Ok(answer) => {
-                        let _ = connection.set_remote_description(answer).await.expect("Could not set remote description!");
+                        let _ = connection.set_remote_description(answer.session_description).await.expect("Could not set remote description!");
 
                         // // @todo wait for actual stop signal here
                         let _ = sc_close_receiver.recv().await;
