@@ -6,7 +6,7 @@ use anyhow::bail;
 use reqwest::StatusCode;
 use serde::Deserialize;
 use serde_json::json;
-use tracing::{error, info, instrument};
+use tracing::{error, info, instrument, trace};
 use webrtc::peer_connection::sdp::session_description::RTCSessionDescription;
 
 #[derive(Deserialize, Debug)]
@@ -97,9 +97,10 @@ impl APIClient {
 
         match json {
             Ok(result) => {
-                info!(
+                trace!(
+                    result.data.create_room.password,
                     result.data.create_room.offer,
-                    result.data.create_room.password, "Response from server"
+                    "Response from server"
                 );
                 let desc_data = decode_b64(result.data.create_room.offer.as_str())?;
                 let answer = serde_json::from_str::<RTCSessionDescription>(&desc_data)?;

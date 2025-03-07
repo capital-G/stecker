@@ -15,8 +15,7 @@ use shared::{
     connections::SteckerWebRTCConnection,
     models::{DataRoomInternalType, SteckerData},
 };
-use tracing::{error, info, info_span, instrument, span, trace, Instrument, Level};
-use tracing_subscriber::fmt::format::FmtSpan;
+use tracing::{error, info, info_span, instrument, trace, Level};
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::{self, filter, fmt};
@@ -27,9 +26,10 @@ fn setup_tracing() {
     let filter = filter::Targets::new()
         .with_default(Level::ERROR)
         .with_target("stecker_sc", Level::TRACE)
-        .with_target("shared", Level::TRACE);
+        .with_target("shared", Level::INFO);
 
-    let formatter = fmt::layer().with_ansi(false).compact();
+    // @todo impl FormatEvent to prefix logs with STECKER:
+    let formatter = fmt::layer().with_ansi(false).compact().without_time();
 
     let subscriber = tracing_subscriber::registry().with(formatter).with(filter);
 
