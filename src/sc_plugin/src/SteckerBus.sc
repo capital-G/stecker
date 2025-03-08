@@ -5,6 +5,12 @@ AbstractStecker {
 	var <bus, <synth;
 	var <>graceTime = 3, <fresh = true;
 
+	classvar prRandSeed;
+
+	*initClass {
+		prRandSeed = inf.asInteger.rand2;
+	}
+
 	*new { |roomName, input|
 		var steckerBus = this.all[roomName];
 		if(steckerBus.isNil) {
@@ -35,6 +41,7 @@ AbstractStecker {
 	asUGenInput { ^0 }
 
 	// private interface
+
 
 	startSynth {
 		if(synth.isPlaying.not) {
@@ -67,6 +74,15 @@ AbstractStecker {
 			"Because a room output can be only on a single server, take care to run this SynthDef only on '%'".format(bus.server).warn
 		}
 	}
+
+	// hasher is surjective within one sclang boot
+	*hasher { |roomName|
+		// convert to string to iterate over the numbers
+		var hashedString = (roomName.asString.hash.abs + prRandSeed).asString.postln;
+		// add ascii offset of 50 to get alphabetical chars
+		^hashedString.collect { |char| (char.ascii + 50).asAscii }
+	}
+
 
 
 }
