@@ -23,6 +23,7 @@ argument:: roomName
 A link::Classes/String:: or link::Classes/Symbol:: of the name of the room to create.
 argument:: host
 A link::Classes/String:: or link::Classes/Symbol:: of the address of the host to use.
+Defaults to TELETYPE::nil:: which will take the value of TELETYPE::Stecker.host::.
 No need to prepend TELETYPE::http:: in front of it, TELETYPE::stecker.myhost.org:: is sufficient.
 
 INSTANCEMETHODS::
