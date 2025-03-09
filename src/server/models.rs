@@ -1,5 +1,6 @@
-use std::{fmt::Display, sync::Arc};
+use std::{any, fmt::Display, sync::Arc};
 
+use anyhow::anyhow;
 use async_graphql::{Enum, SimpleObject};
 use shared::{
     connections::SteckerWebRTCConnection,
@@ -48,6 +49,18 @@ impl BroadcastRoom {
         match self {
             BroadcastRoom::Data(data_room) => data_room.join_room(offer).await,
             BroadcastRoom::Audio(audio_room) => audio_room.join_room(offer).await,
+        }
+    }
+
+    /// replace sender of current broadcast
+    pub async fn replace_sender(
+        &self,
+        offer: &str,
+        password: &str,
+    ) -> anyhow::Result<ResponseOffer> {
+        match self {
+            BroadcastRoom::Audio(audio_room) => audio_room.replace_sender(offer.to_string()).await,
+            BroadcastRoom::Data(data_broadcast_room) => todo!(),
         }
     }
 }
@@ -339,7 +352,10 @@ impl AudioBroadcastRoom {
 
         let audio_channel_tx = audio_channel.audio_channel_tx.clone();
         let disconnected = connection.connection_closed.clone();
+        let mut stop_consuming = audio_channel.reset_sender.subscribe();
 
+        // a thread which consumes the audio data we receive and pushes it to our internal
+        // webrtc channel which is then read/consumed and pushed to all our subscribers
         tokio::spawn(async move {
             let track = audio_track_receiver.recv().await.unwrap();
             let local_track = Arc::new(TrackLocalStaticRTP::new(
@@ -348,12 +364,24 @@ impl AudioBroadcastRoom {
                 "stecker".to_owned(),
             ));
 
+            // this can be replaced with a new one through `replace_sender`
             let _ = audio_channel_tx.send(Some(local_track.clone()));
 
-            // the actual forwarding
-            // @todo improve error handling
-            while let Ok((rtp, _)) = track.read_rtp().await {
-                let _ = local_track.write_rtp(&rtp).await;
+            loop {
+                tokio::select! {
+                    result = track.read_rtp() => {
+                        if let Ok((rtp, _)) = result {
+                            let _ = local_track.write_rtp(&rtp).await;
+                        } else {
+                            error!("Failed to read track - stop consuming");
+                            break;
+                        }
+                   },
+                   _ = stop_consuming.recv() => {
+                        info!("Got signal to terminate consuming the current track");
+                        break;
+                   }
+                }
             }
         });
 
@@ -397,6 +425,59 @@ impl AudioBroadcastRoom {
                 "Have not received an audio track from the sender yet - try later"
             )),
         }
+    }
+
+    pub async fn replace_sender(&self, offer: String) -> anyhow::Result<ResponseOffer> {
+        info!("Replace audio sender");
+        let connection = SteckerWebRTCConnection::build_connection()
+            .in_current_span()
+            .await?;
+        let response_offer = connection.respond_to_offer(offer).in_current_span().await?;
+        let mut audio_track_receiver = connection
+            .listen_for_remote_audio_track()
+            .in_current_span()
+            .await;
+
+        let local_track = if let Some(track) = self
+            .stecker_audio_channel
+            .audio_channel_tx
+            .subscribe()
+            .borrow()
+            .clone()
+        {
+            track
+        } else {
+            return Err(anyhow::anyhow!(
+                "Room has not been sucessfully set up, can not take it over."
+            ));
+        };
+
+        let _ = self.stecker_audio_channel.reset_sender.send(());
+
+        let mut stop_consuming = self.stecker_audio_channel.reset_sender.subscribe();
+
+        tokio::spawn(async move {
+            let track = audio_track_receiver.recv().await.unwrap();
+
+            loop {
+                tokio::select! {
+                    result = track.read_rtp() => {
+                        if let Ok((rtp, _)) = result {
+                            let _ = local_track.write_rtp(&rtp).await;
+                        } else {
+                            error!("Failed to read track - stop consuming");
+                            break;
+                        }
+                   },
+                   _ = stop_consuming.recv() => {
+                        info!("Got signal to terminate consuming the current track");
+                        break;
+                    }
+                }
+            }
+        });
+
+        Ok(response_offer)
     }
 }
 

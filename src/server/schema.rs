@@ -59,11 +59,19 @@ impl Mutation {
 
         if state.room_exists(&name, &room_type).await {
             if let Some(user_provided_password) = password {
-                if (state
+                if state
                     .room_password_match(&name, &room_type, &user_provided_password)
-                    .await)
+                    .await
                 {
                     trace!("Matched password of existing room");
+                    let offer = state
+                        .replace_sender(&name, &room_type, &user_provided_password, &offer)
+                        .await?;
+
+                    return Ok(RoomCreationReply {
+                        offer,
+                        password: user_provided_password,
+                    });
                 }
             };
             return Err(anyhow!("The room name is already taken."));

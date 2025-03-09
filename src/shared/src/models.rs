@@ -167,21 +167,26 @@ impl DataChannelMap {
 
 #[derive(Clone)]
 pub struct SteckerAudioChannel {
-    // pub audio_channel_tx: Sender<Arc<TrackLocalStaticRTP>>,
+    // channel which we use to receive a pushed audio channel
     pub audio_channel_rx: tokio::sync::watch::Receiver<Option<Arc<TrackLocalStaticRTP>>>,
+    // channel which we use to push an audio channel to our consumers
     pub audio_channel_tx: tokio::sync::watch::Sender<Option<Arc<TrackLocalStaticRTP>>>,
+    // sends a signal if the connection was closed by our peer
     pub close: Sender<()>,
+    // drops the current source WebRTC connection so it can be replaced by a new one
+    pub reset_sender: Sender<()>,
 }
 
 impl SteckerAudioChannel {
     pub fn create_channels() -> Self {
         let (close, _) = broadcast::channel::<()>(1);
         let (audio_channel_tx, audio_channel_rx) = tokio::sync::watch::channel(None);
-        // let (audio_channel_tx, _) = broadcast::channel::<Arc<TrackLocalStaticRTP>>(1);
+        let (reset_sender, _) = broadcast::channel::<()>(1);
         SteckerAudioChannel {
             audio_channel_tx,
             audio_channel_rx,
             close,
+            reset_sender,
         }
     }
 }

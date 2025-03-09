@@ -39,6 +39,24 @@ impl AppState {
         }
     }
 
+    pub async fn replace_sender(
+        &self,
+        room_name: &str,
+        room_type: &RoomType,
+        password: &str,
+        offer: &str,
+    ) -> anyhow::Result<String> {
+        match room_type {
+            RoomType::Audio => {
+                self.audio_rooms
+                    .replace_sender(room_name, offer, password)
+                    .await
+            }
+            RoomType::Float => todo!(),
+            RoomType::Chat => todo!(),
+        }
+    }
+
     pub async fn room_password_match(
         &self,
         room_name: &str,
@@ -83,6 +101,13 @@ pub trait RoomMapTrait {
         room_name: &str,
         room_password_match: &str,
     ) -> impl Future<Output = bool>;
+
+    fn replace_sender(
+        &self,
+        room_name: &str,
+        offer: &str,
+        password: &str,
+    ) -> impl Future<Output = anyhow::Result<String>>;
 }
 
 impl RoomMapTrait for RoomMap {
@@ -117,5 +142,23 @@ impl RoomMapTrait for RoomMap {
             rooms.push(room.clone());
         }
         rooms
+    }
+
+    async fn replace_sender(
+        &self,
+        room_name: &str,
+        offer: &str,
+        password: &str,
+    ) -> anyhow::Result<String> {
+        // @todo why doesn't this work?
+        if let Some(room) = self.map.lock().await.get(room_name) {
+            if room.lock().await.meta().admin_password == password {
+                room.lock().await.replace_sender(offer, password).await
+            } else {
+                return Err(anyhow::anyhow!("Password does not match"));
+            }
+        } else {
+            return Err(anyhow::anyhow!("Did not find room"));
+        }
     }
 }

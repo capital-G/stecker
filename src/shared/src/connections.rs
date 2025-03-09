@@ -27,6 +27,7 @@ use webrtc::track::track_local::track_local_static_rtp::TrackLocalStaticRTP;
 use webrtc::track::track_local::track_local_static_sample::TrackLocalStaticSample;
 use webrtc::track::track_remote::TrackRemote;
 
+/// This handles all the setup of a WebRTC peer connection.
 pub struct SteckerWebRTCConnection {
     peer_connection: RTCPeerConnection,
     data_channel_map: Arc<Mutex<DataChannelMap>>,
