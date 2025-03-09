@@ -38,6 +38,31 @@ impl AppState {
             RoomType::Audio => self.audio_rooms.room_exists(room_name).await,
         }
     }
+
+    pub async fn room_password_match(
+        &self,
+        room_name: &str,
+        room_type: &RoomType,
+        password: &str,
+    ) -> bool {
+        match room_type {
+            RoomType::Audio => {
+                self.audio_rooms
+                    .room_password_match(room_name, password)
+                    .await
+            }
+            RoomType::Chat => {
+                self.chat_rooms
+                    .room_password_match(room_name, password)
+                    .await
+            }
+            RoomType::Float => {
+                self.float_rooms
+                    .room_password_match(room_name, password)
+                    .await
+            }
+        }
+    }
 }
 
 pub struct RoomMap {
@@ -53,6 +78,11 @@ pub trait RoomMapTrait {
     ) -> impl Future<Output = ()>;
     fn room_exists(&self, room_name: &str) -> impl Future<Output = bool>;
     fn get_rooms(&self) -> impl Future<Output = Vec<Room>>;
+    fn room_password_match(
+        &self,
+        room_name: &str,
+        room_password_match: &str,
+    ) -> impl Future<Output = bool>;
 }
 
 impl RoomMapTrait for RoomMap {
@@ -67,6 +97,14 @@ impl RoomMapTrait for RoomMap {
 
     async fn room_exists(&self, room_name: &str) -> bool {
         self.map.lock().await.contains_key(room_name)
+    }
+
+    async fn room_password_match(&self, room_name: &str, password: &str) -> bool {
+        if let Some(room) = self.map.lock().await.get(room_name) {
+            room.lock().await.meta().admin_password == password
+        } else {
+            false
+        }
     }
 
     async fn get_rooms(&self) -> Vec<Room> {

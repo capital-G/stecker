@@ -91,12 +91,14 @@ namespace SuperStecker
     DataSteckerOut::DataSteckerOut() {
         mCalcFunc = make_calc_function<DataSteckerOut, &DataSteckerOut::next_k>();
 
-        rust::Str roomName = extractString(1, 3);
-        rust::Str hostName = extractString(2, 3 + (int) in0(1));
+        rust::Str roomName = extractString(1, 4);
+        rust::Str password = extractString(2, 4 + (int) in0(1));
+        rust::Str hostName = extractString(3, 4 + (int) in0(1) + (int) in0(2));
 
         // smart ptr allows us to delay the initialization of room
         m_data_room = std::make_unique<rust::Box<DataRoom>>(create_data_room(
             roomName,
+            password,
             hostName
         ));
 
@@ -117,12 +119,14 @@ namespace SuperStecker
    SteckerOut::SteckerOut() {
         mCalcFunc = make_calc_function<SteckerOut, &SteckerOut::next>();
 
-        rust::Str roomName = extractStringAr(1, 3);
-        rust::Str hostName = extractStringAr(2, 3 + (int) *in(1));
+        rust::Str roomName = extractStringAr(1, 4);
+        rust::Str password = extractStringAr(2, 4 + (int) *in(1));
+        rust::Str hostName = extractStringAr(3, 4 + (int) *in(1) + (int) *in(2));
 
         // smart ptr allows us to delay the initialization of room
         m_audio_room = std::make_unique<rust::Box<AudioRoomSender>>(create_audio_room_sender(
             roomName,
+            password,
             hostName
         ));
 

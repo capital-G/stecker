@@ -142,12 +142,10 @@ impl DataRoom {
         room
     }
 
-    pub fn create_room(name: &str, host: &str) -> Self {
+    pub fn create_room(name: String, password: Option<String>, host: String) -> Self {
         setup_tracing();
-        let name2 = String::from_str(name).unwrap();
-        let host2 = host.to_owned();
-
-        let span = info_span!("create_data_room", room_name = name2);
+        let name2 = name.to_string();
+        let span = info_span!("create_data_room", room_name = name);
         let span2 = span.clone();
 
         let (sender, mut receiver) = broadcast::channel::<f32>(1024);
@@ -192,9 +190,9 @@ impl DataRoom {
                     info!("Stopped forwarding messages from SC to WebRTC");
                 });
 
-                let api_client = APIClient::new(host2);
+                let api_client = APIClient::new(host.to_string());
 
-                match api_client.create_room(&name2, &shared::models::SteckerAPIRoomType::Data(shared::models::DataRoomPublicType::Float), &offer).await {
+                match api_client.create_room(&name2, password.as_deref(), &shared::models::SteckerAPIRoomType::Data(shared::models::DataRoomPublicType::Float), &offer).await {
                     Ok(answer) => {
                         connection.set_remote_description(answer.session_description).await?;
                         info!(answer.password, "Received server response");
@@ -212,7 +210,7 @@ impl DataRoom {
         });
 
         let room = Self {
-            name: name.to_string(),
+            name: name,
             receiver: receiver2,
             sender: sender2,
             last_value: -1.0,
@@ -256,10 +254,11 @@ pub struct AudioRoomSender {
 
 impl AudioRoomSender {
     #[instrument]
-    pub fn create_room(name: &str, host: &str) -> Self {
+    pub fn create_room(name: &str, password: &str, host: &str) -> Self {
         setup_tracing();
         let name2 = name.to_owned();
         let host2 = host.to_owned();
+        let password2 = password.to_owned();
 
         let span = info_span!("create_audio_room", room_name = name2);
         let span2 = span.clone();
@@ -355,7 +354,12 @@ impl AudioRoomSender {
 
                 let api_client = APIClient::new(host2.to_string());
 
-                match api_client.create_room(&name2, &shared::models::SteckerAPIRoomType::Audio, &offer).await {
+                match api_client.create_room(
+                        &name2,
+                        Some(&password2),
+                        &shared::models::SteckerAPIRoomType::Audio,
+                        &offer,
+                    ).await {
                     Ok(answer) => {
                         let _ = connection.set_remote_description(answer.session_description).await.expect("Could not set remote description!");
 
@@ -509,8 +513,12 @@ impl AudioRoomReceiver {
     }
 }
 
-fn create_data_room(name: &str, host: &str) -> Box<DataRoom> {
-    Box::new(DataRoom::create_room(name, host))
+fn create_data_room(name: &str, password: &str, host: &str) -> Box<DataRoom> {
+    Box::new(DataRoom::create_room(
+        name.to_string(),
+        Some(password.to_string()),
+        host.to_string(),
+    ))
 }
 
 fn join_data_room(name: &str, host: &str) -> Box<DataRoom> {
@@ -529,8 +537,8 @@ fn send_data_close_signal(data_room: &mut DataRoom) {
     let _ = data_room.close_sender.send(());
 }
 
-fn create_audio_room_sender(name: &str, host: &str) -> Box<AudioRoomSender> {
-    Box::new(AudioRoomSender::create_room(name, host))
+fn create_audio_room_sender(name: &str, password: &str, host: &str) -> Box<AudioRoomSender> {
+    Box::new(AudioRoomSender::create_room(name, password, host))
 }
 
 unsafe fn push_values_to_web(audio_room: &mut AudioRoomSender, values: *mut f32, num_samples: i32) {
@@ -560,14 +568,15 @@ unsafe fn pull_values_from_web(
 mod ffi {
     extern "Rust" {
         type DataRoom;
-        fn create_data_room(name: &str, host: &str) -> Box<DataRoom>;
+        fn create_data_room(name: &str, password: &str, host: &str) -> Box<DataRoom>;
         fn join_data_room(name: &str, host: &str) -> Box<DataRoom>;
         fn recv_data_message(room: &mut DataRoom) -> f32;
         fn send_data_message(room: &mut DataRoom, value: f32) -> f32;
         fn send_data_close_signal(room: &mut DataRoom);
 
         type AudioRoomSender;
-        fn create_audio_room_sender(name: &str, host: &str) -> Box<AudioRoomSender>;
+        fn create_audio_room_sender(name: &str, password: &str, host: &str)
+            -> Box<AudioRoomSender>;
         unsafe fn push_values_to_web(
             audio_room: &mut AudioRoomSender,
             values: *mut f32,

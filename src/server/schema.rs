@@ -12,7 +12,7 @@ use anyhow::anyhow;
 use tokio::sync::Mutex;
 
 use async_graphql::{Context, Object};
-use tracing::{info, instrument, Instrument, Span};
+use tracing::{info, instrument, trace, Instrument, Span};
 use uuid::Uuid;
 
 use crate::AppState;
@@ -55,24 +55,34 @@ impl Mutation {
         let connection_uuid = Uuid::new_v4();
         tracing::Span::current().record("connection_uuid", connection_uuid.to_string());
 
-        let used_password: String = if let Some(user_provided_password) = password {
+        let state = ctx.data_unchecked::<AppState>();
+
+        if state.room_exists(&name, &room_type).await {
+            if let Some(user_provided_password) = password {
+                if (state
+                    .room_password_match(&name, &room_type, &user_provided_password)
+                    .await)
+                {
+                    trace!("Matched password of existing room");
+                }
+            };
+            return Err(anyhow!("The room name is already taken."));
+        }
+
+        let room_password: String = if let Some(user_provided_password) = password {
             user_provided_password
         } else {
             Alphanumeric.sample_string(&mut rand::thread_rng(), 8)
         };
 
-        let state = ctx.data_unchecked::<AppState>();
-
-        if state.room_exists(&name, &room_type).await {
-            return Err(anyhow!("The room name is already taken."));
-        }
-
         let name2 = name.clone();
+        let room_password2 = room_password.clone();
         match room_type {
             RoomType::Float | RoomType::Chat => {
-                let result = DataBroadcastRoom::create_room(name, offer, room_type.into())
-                    .instrument(Span::current())
-                    .await?;
+                let result =
+                    DataBroadcastRoom::create_room(name, offer, room_type.into(), room_password)
+                        .instrument(Span::current())
+                        .await?;
                 {
                     let mut room_lock = match room_type {
                         RoomType::Float => {
@@ -93,11 +103,11 @@ impl Mutation {
                 }
                 Ok(RoomCreationReply {
                     offer: result.offer,
-                    password: used_password,
+                    password: room_password2,
                 })
             }
             RoomType::Audio => {
-                let result = AudioBroadcastRoom::create_room(name, offer)
+                let result = AudioBroadcastRoom::create_room(name, offer, room_password)
                     .in_current_span()
                     .await?;
                 {
@@ -130,7 +140,7 @@ impl Mutation {
 
                 Ok(RoomCreationReply {
                     offer: result.offer,
-                    password: used_password,
+                    password: room_password2,
                 })
             }
         }

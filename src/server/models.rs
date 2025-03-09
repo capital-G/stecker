@@ -52,9 +52,10 @@ impl BroadcastRoom {
     }
 }
 
-struct BroadcastRoomMeta {
+pub struct BroadcastRoomMeta {
     pub name: String,
     pub uuid: Uuid,
+    pub admin_password: String,
 
     pub meta_reply: Sender<SteckerData>,
     pub meta_broadcast: Sender<SteckerData>,
@@ -112,6 +113,7 @@ impl DataBroadcastRoom {
         name: String,
         offer: String,
         room_type: DataRoomInternalType,
+        password: String,
     ) -> anyhow::Result<BroadcastRoomWithOffer> {
         info!("Something else");
         let connection = SteckerWebRTCConnection::build_connection()
@@ -182,6 +184,7 @@ impl DataBroadcastRoom {
                 meta_reply: meta_channel.outbound.clone(),
                 num_listeners: num_listeners_sender,
                 _num_listeners_receiver: num_listeners_receiver,
+                admin_password: password,
             },
             room_type: room_type,
             reply: stecker_data_channel.outbound.clone(),
@@ -319,6 +322,7 @@ impl AudioBroadcastRoom {
     pub async fn create_room(
         name: String,
         offer: String,
+        admin_password: String,
     ) -> anyhow::Result<AudioBroadcastRoomWithOffer> {
         let connection = SteckerWebRTCConnection::build_connection()
             .in_current_span()
@@ -365,6 +369,7 @@ impl AudioBroadcastRoom {
                     meta_reply: meta_channel.outbound.clone(),
                     num_listeners: num_listeners_sender,
                     _num_listeners_receiver: num_listeners_receiver,
+                    admin_password,
                 },
             },
         });

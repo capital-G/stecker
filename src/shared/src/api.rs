@@ -69,16 +69,29 @@ impl APIClient {
     pub async fn create_room(
         &self,
         name: &str,
+        password: Option<&str>,
         room_type: &SteckerAPIRoomType,
         local_session_description: &str,
     ) -> anyhow::Result<CreateRoomResponse> {
         let room_string: String = room_type.into();
+
+        // @todo skip serialization of password if none, see https://serde.rs/field-attrs.html#skip_serializing_if
+        let used_password = password.unwrap_or("");
+
         let query = json!({
-            "query": "mutation createRoom($name:String!, $offer:String!, $roomType: RoomType!) { createRoom(name:$name, offer:$offer, roomType:$roomType) {offer, password} }",
+            "query": r#"
+                mutation createRoom($name: String!, $offer: String!, $roomType: RoomType!, $password: String) {
+                    createRoom(name: $name, offer: $offer, roomType: $roomType, password: $password) {
+                        offer
+                        password
+                    }
+                }
+            "#,
             "variables": {
                 "name": name,
                 "offer": local_session_description,
                 "roomType": room_string,
+                "password": used_password,
             }
         });
 

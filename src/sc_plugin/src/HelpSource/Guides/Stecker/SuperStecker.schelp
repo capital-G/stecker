@@ -1,7 +1,7 @@
 TITLE::Introduction to Stecker
 summary:: How to stream audio and control signals via the internet
 categories:: Libraries>Stecker, Guides
-related:: Classes/SteckerOut, Classes/SteckerIn, Classes/DataSteckerIn, Classes/DataSteckerOut
+related:: Classes/SteckerOut, Classes/SteckerIn, Classes/DataSteckerIn, Classes/DataSteckerOut, Classes/Stecker
 
 DESCRIPTION::
 

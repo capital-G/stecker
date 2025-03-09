@@ -24,6 +24,9 @@ enum Commands {
         /// name of the new room
         name: String,
 
+        /// admin password of the room
+        password: Option<String>,
+
         /// type of room
         #[clap(value_enum, default_value_t=ClientRoomType::Float)]
         room_type: ClientRoomType,
@@ -54,16 +57,25 @@ async fn main() {
     match &cli.command {
         Some(Commands::CreateRoom {
             name,
+            password,
             room_type,
             host,
         }) => {
             let _ = match room_type {
                 ClientRoomType::Float => {
-                    create_room(name, host, room_type.clone(), SteckerData::F32(42.0)).await
+                    create_room(
+                        name,
+                        password.as_deref(),
+                        host,
+                        room_type.clone(),
+                        SteckerData::F32(42.0),
+                    )
+                    .await
                 }
                 ClientRoomType::Chat => {
                     create_room(
                         name,
+                        password.as_deref(),
                         host,
                         room_type.clone(),
                         SteckerData::String("Hello?".to_string()),
@@ -92,6 +104,7 @@ async fn main() {
 
 async fn create_room(
     name: &str,
+    password: Option<&str>,
     host: &str,
     client_room_type: ClientRoomType,
     value: SteckerData,
@@ -113,7 +126,7 @@ async fn create_room(
     let offer = connection.create_offer().await?;
 
     match api_client
-        .create_room(name, &client_room_type.into(), &offer)
+        .create_room(name, password, &client_room_type.into(), &offer)
         .await
     {
         Ok(answer) => {

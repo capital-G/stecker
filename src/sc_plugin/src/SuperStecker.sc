@@ -1,8 +1,20 @@
 Stecker {
 	classvar <>host;
+	classvar seed;
 
 	*initClass {
 		host = "https://stecker.dennis-scheiba.com";
+		seed = 10e6.rand.asInteger;
+	}
+
+	// hasher is surjective within one sclang boot
+	*hasher {|string|
+		// convert to string in order to iterate over the numbers...
+		// alt: use mod10 with while loop...
+		var hashedString = (string.asString.hash.abs + seed).asString;
+		// add ascii offset of 50 to get normal/printable chars
+		hashedString = hashedString.collect({|c| (c.asInteger+50).asAscii});
+		^hashedString;
 	}
 }
 
@@ -25,19 +37,21 @@ DataSteckerIn : UGen {
 }
 
 DataSteckerOut : UGen {
-	*kr {|input, roomName, host=nil|
+	*kr {|input, roomName, password=nil, host=nil|
 		host = host ? Stecker.host;
-		^this.new1('control', input, roomName, host);
+		password = password ?? {Stecker.hasher(roomName)};
+		^this.new1('control', input, roomName, password, host);
 	}
 
 	checkInputs {
 		^this.checkValidInputs;
 	}
 
-	*new1 {|rate, input, roomName, host|
+	*new1 {|rate, input, roomName, password, host|
 		var roomNameAscii = roomName.ascii;
+		var passwordAscii = password.ascii;
 		var hostAscii = host.ascii;
-		var args = [rate, input, roomNameAscii.size, hostAscii.size].addAll(roomNameAscii).addAll(hostAscii);
+		var args = [rate, input, roomNameAscii.size, passwordAscii.size,  hostAscii.size].addAll(roomNameAscii).addAll(passwordAscii).addAll(hostAscii);
 		^super.new1(*args);
 	}
 }
@@ -61,19 +75,21 @@ SteckerIn : UGen {
 }
 
 SteckerOut : UGen {
-	*ar {|input, roomName, host=nil|
+	*ar {|input, roomName, password=nil, host=nil|
 		host = host ? Stecker.host;
-		^this.new1('audio', input, roomName, host);
+		password = password ?? {Stecker.hasher(roomName)};
+		^this.new1('audio', input, roomName, password, host);
 	}
 
 	checkInputs {
 		^this.checkValidInputs;
 	}
 
-	*new1 {|rate, input, roomName, host|
+	*new1 {|rate, input, roomName, password, host|
 		var roomNameAscii = roomName.ascii;
+		var passwordAscii = password.ascii;
 		var hostAscii = host.ascii;
-		var args = [rate, input, roomNameAscii.size, hostAscii.size].addAll(roomNameAscii).addAll(hostAscii);
+		var args = [rate, input, roomNameAscii.size,  passwordAscii.size, hostAscii.size].addAll(roomNameAscii).addAll(passwordAscii).addAll(hostAscii);
 		^super.new1(*args);
 	}
 }
