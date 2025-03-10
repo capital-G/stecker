@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{sync::Arc, time::Duration};
 
 use crate::{
     models::{
@@ -125,6 +125,13 @@ impl Mutation {
                             todo!("This can not happen - can we inherit the types from above?")
                         }
                     };
+
+                    let mut stream_sequence_number = result
+                        .audio_broadcast_room
+                        .stecker_audio_channel
+                        .sequence_number_receiver
+                        .clone();
+
                     let room_mutex = Arc::new(Mutex::new(BroadcastRoom::Audio(
                         result.audio_broadcast_room,
                     )));
@@ -133,16 +140,21 @@ impl Mutation {
 
                     let audio_room_mutex = state.audio_rooms.map.clone();
 
-                    let close_recv = result.disconnected.clone();
-                    tokio::spawn(
-                        async move {
-                            let _ = close_recv.subscribe().recv().await;
-                            // let mut audio_room_mutex_lock = audio_room_mutex.lock().await;
-                            // audio_room_mutex_lock.remove(&name3);
-                            info!("Cleared room");
+                    tokio::spawn(async move {
+                        loop {
+                            tokio::select! {
+                                _ = stream_sequence_number.changed() => {},
+                                _ = tokio::time::sleep(Duration::from_secs(30)) => {
+                                    info!("Timeout for not receiving any package from the sender");
+                                    break;
+                                }
+                            }
                         }
-                        .in_current_span(),
-                    );
+                        let mut audio_room_mutex_lock = audio_room_mutex.lock().await;
+                        audio_room_mutex_lock.remove(&name3);
+                        info!("Cleared room");
+                    }
+                    .in_current_span(),);
                 }
                 info!("Created an audio room");
 
