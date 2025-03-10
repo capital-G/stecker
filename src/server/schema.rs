@@ -43,7 +43,7 @@ impl Mutation {
         0.
     }
 
-    #[instrument(skip(self, ctx, offer), fields(connection_uuid), parent = None, err)]
+    #[instrument(skip(self, ctx, offer, password), fields(connection_uuid), parent = None, err)]
     async fn create_room<'a>(
         &self,
         ctx: &Context<'a>,
@@ -137,8 +137,8 @@ impl Mutation {
                     tokio::spawn(
                         async move {
                             let _ = close_recv.subscribe().recv().await;
-                            let mut audio_room_mutex_lock = audio_room_mutex.lock().await;
-                            audio_room_mutex_lock.remove(&name3);
+                            // let mut audio_room_mutex_lock = audio_room_mutex.lock().await;
+                            // audio_room_mutex_lock.remove(&name3);
                             info!("Cleared room");
                         }
                         .in_current_span(),

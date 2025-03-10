@@ -73,7 +73,7 @@ impl SteckerWebRTCConnection {
                             let _ = connection_closed3.send(());
                         }
                         state => {
-                            info!(?state, "New connection state");
+                            trace!(?state, "New connection state");
                         }
                     }
                 }

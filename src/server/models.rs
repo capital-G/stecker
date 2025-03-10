@@ -1,4 +1,4 @@
-use std::{any, fmt::Display, sync::Arc};
+use std::{any, fmt::Display, sync::Arc, time::Duration};
 
 use anyhow::anyhow;
 use async_graphql::{Enum, SimpleObject};
@@ -353,37 +353,43 @@ impl AudioBroadcastRoom {
         let audio_channel_tx = audio_channel.audio_channel_tx.clone();
         let disconnected = connection.connection_closed.clone();
         let mut stop_consuming = audio_channel.reset_sender.subscribe();
+        let seq_number_sender = audio_channel.sequence_number_sender.clone();
 
         // a thread which consumes the audio data we receive and pushes it to our internal
         // webrtc channel which is then read/consumed and pushed to all our subscribers
-        tokio::spawn(async move {
-            let track = audio_track_receiver.recv().await.unwrap();
-            let local_track = Arc::new(TrackLocalStaticRTP::new(
-                track.codec().capability,
-                "audio".to_owned(),
-                "stecker".to_owned(),
-            ));
+        tokio::spawn(
+            async move {
+                let track = audio_track_receiver.recv().await.unwrap();
+                let local_track = Arc::new(TrackLocalStaticRTP::new(
+                    track.codec().capability,
+                    "audio".to_owned(),
+                    "stecker".to_owned(),
+                ));
 
-            // this can be replaced with a new one through `replace_sender`
-            let _ = audio_channel_tx.send(Some(local_track.clone()));
+                let _ = audio_channel_tx.send(Some(local_track.clone()));
 
-            loop {
-                tokio::select! {
-                    result = track.read_rtp() => {
-                        if let Ok((rtp, _)) = result {
-                            let _ = local_track.write_rtp(&rtp).await;
-                        } else {
-                            error!("Failed to read track - stop consuming");
+                loop {
+                    tokio::select! {
+                        result = track.read_rtp() => {
+                            if let Ok((rtp, _)) = result {
+                                let seq_number = rtp.header.sequence_number;
+                                let _ = seq_number_sender.send(seq_number);
+                                // trace!(seq_number, "Currently sending");
+                                let _ = local_track.write_rtp(&rtp).await;
+                            } else {
+                                error!("Failed to read track - stop consuming");
+                                break;
+                            }
+                       },
+                       _ = stop_consuming.recv() => {
+                            info!("Got signal to terminate consuming the current track");
                             break;
-                        }
-                   },
-                   _ = stop_consuming.recv() => {
-                        info!("Got signal to terminate consuming the current track");
-                        break;
-                   }
+                       }
+                    }
                 }
             }
-        });
+            .in_current_span(),
+        );
 
         return Ok(AudioBroadcastRoomWithOffer {
             offer: response_offer,
@@ -455,27 +461,42 @@ impl AudioBroadcastRoom {
         let _ = self.stecker_audio_channel.reset_sender.send(());
 
         let mut stop_consuming = self.stecker_audio_channel.reset_sender.subscribe();
+        let seq_number_sender = self.stecker_audio_channel.sequence_number_sender.clone();
+        let mut seq_number_receiver = self.stecker_audio_channel.sequence_number_receiver.clone();
+        let _ = *seq_number_receiver.borrow_and_update();
 
-        tokio::spawn(async move {
-            let track = audio_track_receiver.recv().await.unwrap();
+        tokio::spawn(
+            async move {
+                let track = audio_track_receiver.recv().await.unwrap();
+                let ssrc = track.ssrc();
+                trace!(ssrc, "Start consuming new audio track");
 
-            loop {
-                tokio::select! {
-                    result = track.read_rtp() => {
-                        if let Ok((rtp, _)) = result {
-                            let _ = local_track.write_rtp(&rtp).await;
-                        } else {
-                            error!("Failed to read track - stop consuming");
+                let mut last_seq: u16 = (*seq_number_receiver.borrow_and_update()).clone();
+
+                loop {
+                    tokio::select! {
+                        result = track.read_rtp() => {
+                            if let Ok((mut rtp, _)) = result {
+                                // we need to reorder RTP packages b/c otherwise the client will
+                                // think there was a package drop b/c of a gap in the seq order
+                                last_seq = last_seq.wrapping_add(1);
+                                rtp.header.sequence_number = last_seq;
+                                let _ = seq_number_sender.send(last_seq);
+                                let _ = local_track.write_rtp(&rtp).await;
+                            } else {
+                                error!("Failed to read track - stop consuming");
+                                break;
+                            }
+                       },
+                       _ = stop_consuming.recv() => {
+                            info!("Got signal to terminate consuming the current track");
                             break;
                         }
-                   },
-                   _ = stop_consuming.recv() => {
-                        info!("Got signal to terminate consuming the current track");
-                        break;
                     }
                 }
             }
-        });
+            .in_current_span(),
+        );
 
         Ok(response_offer)
     }

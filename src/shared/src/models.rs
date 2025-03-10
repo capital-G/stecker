@@ -175,6 +175,11 @@ pub struct SteckerAudioChannel {
     pub close: Sender<()>,
     // drops the current source WebRTC connection so it can be replaced by a new one
     pub reset_sender: Sender<()>,
+    // if we want to replace a running sender, we also need to continue the sequence_number
+    // of the RTP packages
+    pub sequence_number_sender: tokio::sync::watch::Sender<u16>,
+    // we also add the receiver b/c if we subscribe later we will not get the values before subscription
+    pub sequence_number_receiver: tokio::sync::watch::Receiver<u16>,
 }
 
 impl SteckerAudioChannel {
@@ -182,11 +187,15 @@ impl SteckerAudioChannel {
         let (close, _) = broadcast::channel::<()>(1);
         let (audio_channel_tx, audio_channel_rx) = tokio::sync::watch::channel(None);
         let (reset_sender, _) = broadcast::channel::<()>(1);
+        let (sequence_number_sender, sequence_number_receiver) =
+            tokio::sync::watch::channel::<u16>(0);
         SteckerAudioChannel {
             audio_channel_tx,
             audio_channel_rx,
             close,
             reset_sender,
+            sequence_number_sender,
+            sequence_number_receiver,
         }
     }
 }
