@@ -422,7 +422,7 @@ impl AudioBroadcastRoom {
 
         match audio_track_receiver {
             Some(audio_track) => {
-                info!("Found an audio track");
+                trace!("Found an audio track");
                 let _ = connection.add_existing_audio_track(audio_track).await;
                 let response_offer = connection.respond_to_offer(offer.to_owned()).await?;
                 Ok(response_offer)
