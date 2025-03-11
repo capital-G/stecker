@@ -13,7 +13,7 @@ Allows to set an implicit host for all Stecker instances.
 
 METHOD:: hasher
 Scrambles a given link::Classes/String:: by using hashing.
-This will always yield the same result for a given link::Classes/String:: during one interpreter session, but will yield a different link::Classes/String:: after a reboot of the interpreter.
+This will always yield the same result for a given link::Classes/String:: during a single interpreter session, but will yield a different link::Classes/String:: after a reboot of the interpreter.
 argument:: string
 link::Classes/String:: to scramble.
 

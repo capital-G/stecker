@@ -23,7 +23,7 @@ argument:: roomName
 A link::Classes/String:: or link::Classes/Symbol:: of the name of the room to create.
 argument:: password
 An optional link::Classes/String:: which can be used to re-claim a stream in case the connection gets interrupted.
-If no password is provided, link::Classes/Stecker#*hasher:: will be applied on TELETYPE::roomName:: so a password will be generated from the room name which is deterministic across an interpreter sessions.
+If no password is provided, link::Classes/Stecker#*hasher:: will be applied on TELETYPE::roomName:: so a password will be generated from the room name which is deterministic across a single interpreter session.
 argument:: host
 A link::Classes/String:: or link::Classes/Symbol:: of the address of the host to use.
 Defaults to TELETYPE::nil:: which will take the value of TELETYPE::Stecker.host::.
