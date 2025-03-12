@@ -171,15 +171,12 @@ impl RoomMapTrait for RoomMap {
     async fn get_room(&self, dispatcher: &RoomDispatcher) -> anyhow::Result<Room> {
         let rooms_guard = self.map.lock().await;
 
-        // let matched_rooms: Vec<_> = rooms_guard.values().filter(|room| {
-        //     dispatcher.rule.is_match(&room.blocking_lock().meta().name)
-        // }).cloned().collect();
-
+        // is this the proper way to do this?
         let matched_rooms: Vec<_> = stream::iter(rooms_guard.values())
             .filter_map(|room| async {
-                let room_guard = room.lock().await; // Asynchronously acquire the lock
+                let room_guard = room.lock().await;
                 if dispatcher.rule.is_match(&room_guard.meta().name) {
-                    Some(room.clone()) // Clone if it matches
+                    Some(room.clone())
                 } else {
                     None
                 }

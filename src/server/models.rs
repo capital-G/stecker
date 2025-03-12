@@ -32,7 +32,8 @@ pub struct RoomDispatcher {
     pub rule: Regex,
     pub room_type: RoomType,
     pub dispatcher_type: DispatcherType,
-    pub timeout: LocalDateTime,
+    pub timeout_sender: tokio::sync::watch::Sender<Duration>,
+    pub timeout_receiver: tokio::sync::watch::Receiver<Duration>,
 }
 
 // graphql conversion
@@ -62,11 +63,13 @@ pub struct RoomDispatcherInput {
     pub rule: String,
     pub room_type: RoomType,
     pub dispatcher_type: DispatcherType,
-    pub timeout: i32,
+    pub timeout: u64,
 }
 
 impl From<RoomDispatcherInput> for RoomDispatcher {
     fn from(value: RoomDispatcherInput) -> Self {
+        let (timeout_sender, timeout_receiver) =
+            tokio::sync::watch::channel(Duration::from_secs(value.timeout));
         RoomDispatcher {
             name: value.name,
             admin_password: if let Some(pw) = value.admin_password {
@@ -77,7 +80,8 @@ impl From<RoomDispatcherInput> for RoomDispatcher {
             rule: Regex::new(&value.rule).unwrap(),
             room_type: value.room_type,
             dispatcher_type: value.dispatcher_type,
-            timeout: LocalDateTime::now().add_seconds(value.timeout.into()),
+            timeout_sender,
+            timeout_receiver,
         }
     }
 }

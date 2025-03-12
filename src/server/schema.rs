@@ -7,10 +7,14 @@ use crate::{
     },
     state::RoomMapTrait,
 };
+use datetime::LocalDateTime;
 use rand::distributions::{Alphanumeric, DistString};
 
 use anyhow::anyhow;
-use tokio::sync::Mutex;
+use tokio::{
+    sync::Mutex,
+    time::{sleep, sleep_until},
+};
 
 use async_graphql::{Context, Object};
 use tracing::{info, instrument, trace, Instrument, Span};
@@ -186,6 +190,7 @@ impl Mutation {
     ) -> anyhow::Result<RoomDispatcher> {
         let name = dispatcher.name.clone();
         let admin_password = dispatcher.admin_password.clone();
+        let timeout_value = dispatcher.timeout;
 
         let room_dispatcher: RoomDispatcher = dispatcher.into();
         let state = ctx.data_unchecked::<AppState>();
@@ -194,7 +199,9 @@ impl Mutation {
             if let Some(pw) = admin_password {
                 if pw == existing_dispatcher.admin_password {
                     existing_dispatcher.rule = room_dispatcher.rule;
-                    existing_dispatcher.timeout = room_dispatcher.timeout;
+                    let _ = existing_dispatcher
+                        .timeout_sender
+                        .send(Duration::from_secs(timeout_value));
                     return Ok(existing_dispatcher.clone());
                 } else {
                     return Err(anyhow!("Password of existing dispatcher does not match"));
@@ -204,8 +211,9 @@ impl Mutation {
                     "Dispatcher already exists and no password provided"
                 ));
             }
-        } else {
         };
+
+        let mut timeout_receiver = room_dispatcher.timeout_receiver.clone();
 
         state
             .room_dispatchers
@@ -213,6 +221,24 @@ impl Mutation {
             .await
             .insert(room_dispatcher.name.clone(), room_dispatcher.clone());
         info!("Created a new dispatcher");
+
+        let dispatcher_map_lock = state.room_dispatchers.clone();
+        let name2 = name.clone();
+        tokio::spawn(
+            async move {
+                loop {
+                    let duration = *timeout_receiver.borrow();
+                    tokio::select! {
+                        _ = timeout_receiver.changed() => {}
+                        _ = sleep(duration) => {break}
+                    }
+                }
+                info!("Dispatcher timed out - will be deleted now");
+                dispatcher_map_lock.lock().await.remove(&name2);
+            }
+            .in_current_span(),
+        );
+
         Ok(room_dispatcher)
     }
 
