@@ -1,18 +1,86 @@
 use std::{any, fmt::Display, sync::Arc, time::Duration};
 
-use anyhow::anyhow;
-use async_graphql::{Enum, SimpleObject};
+use async_graphql::{Enum, InputObject, Object, SimpleObject};
+use datetime::LocalDateTime;
+use rand::rngs::StdRng;
+use rand::{
+    distributions::{Alphanumeric, DistString},
+    SeedableRng,
+};
+use regex::Regex;
 use shared::{
     connections::SteckerWebRTCConnection,
     models::{DataRoomInternalType, SteckerAudioChannel, SteckerData},
 };
-use tokio::sync::broadcast::Sender;
+use tokio::sync::{broadcast::Sender, Mutex};
 use tracing::{error, info, instrument, trace, warn, Instrument, Span};
 use uuid::Uuid;
 use webrtc::track::track_local::track_local_static_rtp::TrackLocalStaticRTP;
 use webrtc::track::track_local::TrackLocalWriter;
 
 // graphql objects
+
+#[derive(Enum, Copy, Clone, Eq, PartialEq, Debug)]
+pub enum DispatcherType {
+    Random,
+}
+
+#[derive(Clone)]
+pub struct RoomDispatcher {
+    pub name: String,
+    pub admin_password: String,
+    pub rule: Regex,
+    pub room_type: RoomType,
+    pub dispatcher_type: DispatcherType,
+    pub timeout: LocalDateTime,
+}
+
+// graphql conversion
+#[Object]
+impl RoomDispatcher {
+    async fn name(&self) -> String {
+        self.name.clone()
+    }
+
+    async fn rule(&self) -> String {
+        self.rule.as_str().to_string()
+    }
+
+    async fn room_type(&self) -> RoomType {
+        self.room_type
+    }
+
+    async fn dispatcher_type(&self) -> DispatcherType {
+        self.dispatcher_type
+    }
+}
+
+#[derive(InputObject, Clone)]
+pub struct RoomDispatcherInput {
+    pub name: String,
+    pub admin_password: Option<String>,
+    pub rule: String,
+    pub room_type: RoomType,
+    pub dispatcher_type: DispatcherType,
+    pub timeout: i32,
+}
+
+impl From<RoomDispatcherInput> for RoomDispatcher {
+    fn from(value: RoomDispatcherInput) -> Self {
+        RoomDispatcher {
+            name: value.name,
+            admin_password: if let Some(pw) = value.admin_password {
+                pw
+            } else {
+                Alphanumeric.sample_string(&mut StdRng::from_entropy(), 8)
+            },
+            rule: Regex::new(&value.rule).unwrap(),
+            room_type: value.room_type,
+            dispatcher_type: value.dispatcher_type,
+            timeout: LocalDateTime::now().add_seconds(value.timeout.into()),
+        }
+    }
+}
 
 #[derive(Enum, Copy, Clone, Eq, PartialEq, Debug)]
 // #[graphql(remote = "shared::models::RoomType")]

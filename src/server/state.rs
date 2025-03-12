@@ -1,13 +1,16 @@
-use std::{collections::HashMap, future::Future, sync::Arc};
+use futures::stream::{self, StreamExt};
+use std::{clone, collections::HashMap, future::Future, sync::Arc};
 
+use rand::{rngs::StdRng, seq::SliceRandom, SeedableRng};
 use tokio::sync::Mutex;
 
-use crate::models::{BroadcastRoom, Room, RoomType};
+use crate::models::{BroadcastRoom, Room, RoomDispatcher, RoomType};
 
 pub struct AppState {
     pub float_rooms: RoomMap,
     pub chat_rooms: RoomMap,
     pub audio_rooms: RoomMap,
+    pub room_dispatchers: Arc<Mutex<HashMap<String, RoomDispatcher>>>,
 }
 
 impl AppState {
@@ -22,6 +25,7 @@ impl AppState {
             audio_rooms: RoomMap {
                 map: Arc::new(Mutex::new(HashMap::new())),
             },
+            room_dispatchers: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
@@ -108,6 +112,8 @@ pub trait RoomMapTrait {
         offer: &str,
         password: &str,
     ) -> impl Future<Output = anyhow::Result<String>>;
+
+    fn get_room(&self, dispatcher: &RoomDispatcher) -> impl Future<Output = anyhow::Result<Room>>;
 }
 
 impl RoomMapTrait for RoomMap {
@@ -159,6 +165,37 @@ impl RoomMapTrait for RoomMap {
             }
         } else {
             return Err(anyhow::anyhow!("Did not find room"));
+        }
+    }
+
+    async fn get_room(&self, dispatcher: &RoomDispatcher) -> anyhow::Result<Room> {
+        let rooms_guard = self.map.lock().await;
+
+        // let matched_rooms: Vec<_> = rooms_guard.values().filter(|room| {
+        //     dispatcher.rule.is_match(&room.blocking_lock().meta().name)
+        // }).cloned().collect();
+
+        let matched_rooms: Vec<_> = stream::iter(rooms_guard.values())
+            .filter_map(|room| async {
+                let room_guard = room.lock().await; // Asynchronously acquire the lock
+                if dispatcher.rule.is_match(&room_guard.meta().name) {
+                    Some(room.clone()) // Clone if it matches
+                } else {
+                    None
+                }
+            })
+            .collect()
+            .await;
+
+        match dispatcher.dispatcher_type {
+            crate::models::DispatcherType::Random => {
+                if let Some(room) = matched_rooms.choose(&mut StdRng::from_entropy()) {
+                    let room_lock = room.lock().await;
+                    return Ok((&*room_lock).into());
+                } else {
+                    return Err(anyhow::anyhow!("Did not match any room"));
+                }
+            }
         }
     }
 }

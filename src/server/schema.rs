@@ -2,7 +2,8 @@ use std::{sync::Arc, time::Duration};
 
 use crate::{
     models::{
-        AudioBroadcastRoom, BroadcastRoom, DataBroadcastRoom, Room, RoomCreationReply, RoomType,
+        AudioBroadcastRoom, BroadcastRoom, DataBroadcastRoom, Room, RoomCreationReply,
+        RoomDispatcher, RoomDispatcherInput, RoomType,
     },
     state::RoomMapTrait,
 };
@@ -29,6 +30,17 @@ impl Query {
             RoomType::Chat => state.chat_rooms.get_rooms().await,
             RoomType::Audio => state.audio_rooms.get_rooms().await,
         }
+    }
+
+    async fn room_dipsatchers<'a>(&self, ctx: &Context<'a>) -> Vec<RoomDispatcher> {
+        let state = ctx.data_unchecked::<AppState>();
+        state
+            .room_dispatchers
+            .lock()
+            .await
+            .values()
+            .map(|x| x.clone())
+            .collect()
     }
 }
 
@@ -166,6 +178,44 @@ impl Mutation {
         }
     }
 
+    #[instrument(skip(self, ctx, dispatcher), fields(dispatcher_name=dispatcher.name), parent = None, err)]
+    async fn create_dispatcher<'a>(
+        &self,
+        ctx: &Context<'a>,
+        dispatcher: RoomDispatcherInput,
+    ) -> anyhow::Result<RoomDispatcher> {
+        let name = dispatcher.name.clone();
+        let admin_password = dispatcher.admin_password.clone();
+
+        let room_dispatcher: RoomDispatcher = dispatcher.into();
+        let state = ctx.data_unchecked::<AppState>();
+
+        if let Some(existing_dispatcher) = state.room_dispatchers.lock().await.get_mut(&name) {
+            if let Some(pw) = admin_password {
+                if pw == existing_dispatcher.admin_password {
+                    existing_dispatcher.rule = room_dispatcher.rule;
+                    existing_dispatcher.timeout = room_dispatcher.timeout;
+                    return Ok(existing_dispatcher.clone());
+                } else {
+                    return Err(anyhow!("Password of existing dispatcher does not match"));
+                }
+            } else {
+                return Err(anyhow!(
+                    "Dispatcher already exists and no password provided"
+                ));
+            }
+        } else {
+        };
+
+        state
+            .room_dispatchers
+            .lock()
+            .await
+            .insert(room_dispatcher.name.clone(), room_dispatcher.clone());
+        info!("Created a new dispatcher");
+        Ok(room_dispatcher)
+    }
+
     #[instrument(skip(self, ctx, offer), fields(connection_uuid), parent = None, err)]
     async fn join_room<'a>(
         &self,
@@ -209,6 +259,20 @@ impl Mutation {
                     .await?),
                 None => Err(anyhow!("No such room {name}")),
             },
+        }
+    }
+
+    async fn access_dispatcher<'a>(&self, ctx: &Context<'a>, name: String) -> anyhow::Result<Room> {
+        let state = ctx.data_unchecked::<AppState>();
+
+        if let Some(dispatcher) = state.room_dispatchers.lock().await.get(&name) {
+            match dispatcher.room_type {
+                RoomType::Float => todo!(),
+                RoomType::Chat => todo!(),
+                RoomType::Audio => state.audio_rooms.get_room(dispatcher).await,
+            }
+        } else {
+            Err(anyhow!("Could not find a dispatcher with the given name"))
         }
     }
 }
