@@ -233,10 +233,13 @@ Alpine.store("stecker", {
             },
             body: JSON.stringify({
                 query: `
-            mutation createRoom($name:String!, $offer:String!, $roomType: RoomType!) {
-              createRoom(name:$name, offer: $offer, roomType: $roomType)
-            }
-          `,
+                    mutation createRoom($name:String!, $offer:String!, $roomType: RoomType!) {
+                        createRoom(name:$name, offer: $offer, roomType: $roomType) {
+                            offer,
+                            password,
+                        }
+                    }
+                `,
                 variables: {
                     name: name,
                     offer: localSessionDescription,
@@ -256,7 +259,7 @@ Alpine.store("stecker", {
         }
 
         // put this into stecker connection class?
-        let remoteSessionDescription = jsonResponse.data.createRoom;
+        let remoteSessionDescription = jsonResponse.data.createRoom.offer;
         steckerConnection.peerConnection.setRemoteDescription(
             new RTCSessionDescription(JSON.parse(atob(remoteSessionDescription)))
         );
