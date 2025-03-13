@@ -32,7 +32,7 @@ impl Query {
         }
     }
 
-    async fn room_dipsatchers<'a>(&self, ctx: &Context<'a>) -> Vec<RoomDispatcher> {
+    async fn room_dispatchers<'a>(&self, ctx: &Context<'a>) -> Vec<RoomDispatcher> {
         let state = ctx.data_unchecked::<AppState>();
         state
             .room_dispatchers
