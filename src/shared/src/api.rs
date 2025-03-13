@@ -6,7 +6,7 @@ use anyhow::bail;
 use reqwest::StatusCode;
 use serde::Deserialize;
 use serde_json::json;
-use tracing::{error, info, instrument, trace};
+use tracing::{error, instrument, trace};
 use webrtc::peer_connection::sdp::session_description::RTCSessionDescription;
 
 #[derive(Deserialize, Debug)]

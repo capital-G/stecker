@@ -8,9 +8,7 @@ use anyhow::anyhow;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use tokio::sync::broadcast::{self, Receiver, Sender};
-use tracing::{
-    error_span, info, info_span, instrument, span, trace, trace_span, warn, Instrument, Span,
-};
+use tracing::{info, instrument, trace, warn, Instrument, Span};
 use webrtc::api::interceptor_registry::register_default_interceptors;
 use webrtc::api::media_engine::{MediaEngine, MIME_TYPE_OPUS};
 use webrtc::api::APIBuilder;
