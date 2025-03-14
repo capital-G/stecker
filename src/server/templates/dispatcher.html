@@ -34,23 +34,29 @@
                 <span class="error" x-text="$store.dispatcher.error"></span>
             </template>
             <template x-if="$store.dispatcher.roomName">
-                <div class="room-available">
-                    <span class="text" x-text="$store.dispatcher.roomName"></span>
-                    <button
-                        class="button"
-                        @click="$store.stecker.joinRoom(`${$store.dispatcher.roomName}`, 'AUDIO')"
-                        x-bind:disabled="$store.stecker.connectedRoom"
-                    >
-                        Join
-                    </button>
-                    <div class="column">
-                        <div class="field">
-                            <label class="label">Audio</label>
-                            <div class="control">
-                                <audio controls style="width: 100%;" id="audio-player"></audio>
+                <div class="room-available content">
+                    <p>
+                        Your room is <span class="text" x-text="$store.dispatcher.roomName"></span>
+                    </p>
+                    <p>
+                        <button
+                            class="button"
+                            @click="$store.stecker.joinRoom(`${$store.dispatcher.roomName}`, 'AUDIO')"
+                            x-bind:disabled="$store.stecker.connectedRoom"
+                        >
+                            Start playing
+                        </button>
+                    </p>
+                    <p>
+                        <div class="column">
+                            <div class="field">
+                                <label class="label">Audio</label>
+                                <div class="control">
+                                    <audio controls style="width: 100%;" id="audio-player"></audio>
+                                </div>
                             </div>
                         </div>
-                    </div>
+                    </p>
                 </div>
             </template>
         </div>
