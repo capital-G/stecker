@@ -17,7 +17,7 @@ use axum::{
 use clap::Parser;
 use state::AppState;
 use tokio::net::TcpListener;
-use tower_http::services::ServeDir;
+use tower_http::services::{ServeDir, ServeFile};
 use tracing::Level;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
@@ -60,12 +60,19 @@ async fn main() {
         .extension(Tracing)
         .finish();
 
+    let templates_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("templates");
+
     let app = Router::new()
         .route("/graphql", get(graphiql).post_service(GraphQL::new(schema)))
         .nest_service(
-            "/",
-            ServeDir::new(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("templates")),
-        );
+            "/s/:name",
+            ServeFile::new(templates_dir.join("stream.html")),
+        )
+        .nest_service(
+            "/d/:name",
+            ServeFile::new(templates_dir.join("dispatcher.html")),
+        )
+        .nest_service("/", ServeDir::new(templates_dir));
 
     println!("Start serving on http://{}:{}", args.host, args.port);
     axum::serve(

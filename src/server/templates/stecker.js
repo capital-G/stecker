@@ -281,6 +281,33 @@ Alpine.store("stecker", {
 
     /**
      *
+     * @param {String} dispatcherName
+     */
+    async accessDispatcher(dispatcherName) {
+        let response = await fetch(this.HOST, {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+                query: `
+                mutation accessDispatcher($dispatcherName: String!) {
+                    accessDispatcher(name: $dispatcherName) {
+                        name,
+                        roomType,
+                    }
+                }
+                `,
+                variables: {
+                    dispatcherName
+                },
+            }),
+        });
+        return await response.json();
+    },
+
+    /**
+     *
      * @param {string} name
      * @param {string} roomType
      */
