@@ -11,6 +11,9 @@ use webrtc::{
     track::track_local::track_local_static_rtp::TrackLocalStaticRTP,
 };
 
+// @todo use cargo.toml version
+pub static API_VERSION: &'static str = "0.1.0";
+
 /// the possible kinds of data rooms used
 #[derive(Copy, Clone, Eq, PartialEq)]
 pub enum DataRoomInternalType {

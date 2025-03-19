@@ -10,6 +10,7 @@ use crate::{
 use rand::distributions::{Alphanumeric, DistString};
 
 use anyhow::anyhow;
+use shared::models::API_VERSION;
 use tokio::{sync::Mutex, time::sleep};
 
 use async_graphql::{Context, Object};
@@ -22,6 +23,10 @@ pub struct Query;
 
 #[Object]
 impl Query {
+    async fn api_version<'a>(&self) -> String {
+        API_VERSION.to_string()
+    }
+
     async fn rooms<'a>(&self, ctx: &Context<'a>, room_type: RoomType) -> Vec<Room> {
         let state = ctx.data_unchecked::<AppState>();
 
