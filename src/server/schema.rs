@@ -28,7 +28,7 @@ impl Query {
     }
 
     async fn rooms<'a>(&self, ctx: &Context<'a>, room_type: RoomType) -> Vec<Room> {
-        let state = ctx.data_unchecked::<AppState>();
+        let state = ctx.data_unchecked::<Arc<AppState>>();
 
         match room_type {
             RoomType::Float => state.float_rooms.get_rooms().await,
@@ -38,7 +38,7 @@ impl Query {
     }
 
     async fn room_dispatchers<'a>(&self, ctx: &Context<'a>) -> Vec<RoomDispatcher> {
-        let state = ctx.data_unchecked::<AppState>();
+        let state = ctx.data_unchecked::<Arc<AppState>>();
         state
             .room_dispatchers
             .lock()
@@ -55,7 +55,7 @@ pub struct Mutation;
 impl Mutation {
     #[instrument(skip_all, parent = None)]
     async fn reset_rooms<'a>(&self, ctx: &Context<'a>) -> f32 {
-        ctx.data_unchecked::<AppState>().reset_rooms().await;
+        ctx.data_unchecked::<Arc<AppState>>().reset_rooms().await;
         info!("Resetted rooms");
         0.
     }
@@ -72,7 +72,7 @@ impl Mutation {
         let connection_uuid = Uuid::new_v4();
         tracing::Span::current().record("connection_uuid", connection_uuid.to_string());
 
-        let state = ctx.data_unchecked::<AppState>();
+        let state = ctx.data_unchecked::<Arc<AppState>>();
 
         if state.room_exists(&name, &room_type).await {
             if let Some(user_provided_password) = password {
@@ -194,7 +194,7 @@ impl Mutation {
         let timeout_value = dispatcher.timeout;
 
         let room_dispatcher: RoomDispatcher = dispatcher.into();
-        let state = ctx.data_unchecked::<AppState>();
+        let state = ctx.data_unchecked::<Arc<AppState>>();
 
         if let Some(existing_dispatcher) = state.room_dispatchers.lock().await.get_mut(&name) {
             if let Some(pw) = admin_password {
@@ -256,7 +256,7 @@ impl Mutation {
 
         info!("Join room");
 
-        let state = ctx.data_unchecked::<AppState>();
+        let state = ctx.data_unchecked::<Arc<AppState>>();
 
         match room_type {
             RoomType::Float => match state.float_rooms.map.lock().await.get(&name) {
@@ -290,7 +290,7 @@ impl Mutation {
     }
 
     async fn access_dispatcher<'a>(&self, ctx: &Context<'a>, name: String) -> anyhow::Result<Room> {
-        let state = ctx.data_unchecked::<AppState>();
+        let state = ctx.data_unchecked::<Arc<AppState>>();
 
         if let Some(dispatcher) = state.room_dispatchers.lock().await.get(&name) {
             match dispatcher.room_type {
