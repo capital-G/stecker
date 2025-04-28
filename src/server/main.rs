@@ -1,3 +1,4 @@
+pub mod event_service;
 pub mod models;
 pub mod osc_listener;
 pub mod schema;
@@ -65,10 +66,11 @@ async fn main() {
         .with(filter)
         .init();
 
-    let state = Arc::new(AppState::new());
+    let app_state = Arc::new(AppState::new());
+    let app_state2 = app_state.clone();
 
     let schema = Schema::build(Query, Mutation, EmptySubscription)
-        .data(state.clone())
+        .data(app_state.clone())
         .extension(Tracing)
         .finish();
 
@@ -80,7 +82,7 @@ async fn main() {
         .route("/debug", get(async || DebugTemplate {}))
         .route("/s/:name", get(stream_view))
         .route("/d/:name", get(dispatcher_view))
-        .with_state(state.clone());
+        .with_state(app_state.clone());
 
     let http_handle = tokio::spawn(async move {
         info!("Start http serving on http://{}:{}", args.host, args.port);
@@ -100,7 +102,10 @@ async fn main() {
             match tcp_osc_listener.accept().await {
                 Ok((osc_socket, addr)) => {
                     debug!("New OSC connection from {:?}:{:?}", addr.ip(), addr.port());
-                    tokio::spawn(async move { handle_osc_client(osc_socket, addr).await });
+                    let osc_app_state = app_state2.clone();
+                    tokio::spawn(async move {
+                        handle_osc_client(osc_socket, addr, osc_app_state).await
+                    });
                 }
                 Err(e) => error!("TCP-OSC connection failed: {:?}", e),
             }

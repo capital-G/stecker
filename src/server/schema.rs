@@ -11,10 +11,7 @@ use rand::distributions::{Alphanumeric, DistString};
 
 use anyhow::anyhow;
 use shared::models::API_VERSION;
-use tokio::{
-    sync::{Mutex, RwLock},
-    time::sleep,
-};
+use tokio::{sync::RwLock, time::sleep};
 
 use async_graphql::{Context, Object};
 use tracing::{info, instrument, trace, Instrument, Span};

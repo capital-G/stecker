@@ -4,32 +4,43 @@ use std::{collections::HashMap, future::Future, sync::Arc};
 use rand::{rngs::StdRng, seq::SliceRandom, SeedableRng};
 use tokio::sync::RwLock;
 
-use crate::models::{BroadcastRoom, Room, RoomDispatcher, RoomType};
+use crate::{
+    event_service::RoomEvent,
+    models::{BroadcastRoom, Room, RoomDispatcher, RoomType},
+};
 
 pub struct AppState {
     pub float_rooms: RoomMap,
     pub chat_rooms: RoomMap,
     pub audio_rooms: RoomMap,
     pub room_dispatchers: Arc<RwLock<HashMap<String, RoomDispatcher>>>,
+
+    pub room_events: tokio::sync::broadcast::Sender<RoomEvent>,
 }
 
 impl AppState {
     pub fn new() -> Self {
+        let (room_event_rx, _) = tokio::sync::broadcast::channel(32);
         Self {
             float_rooms: RoomMap {
                 map: Arc::new(RwLock::new(HashMap::new())),
+                room_events: room_event_rx.clone(),
             },
             chat_rooms: RoomMap {
                 map: Arc::new(RwLock::new(HashMap::new())),
+                room_events: room_event_rx.clone(),
             },
             audio_rooms: RoomMap {
                 map: Arc::new(RwLock::new(HashMap::new())),
+                room_events: room_event_rx.clone(),
             },
             room_dispatchers: Arc::new(RwLock::new(HashMap::new())),
+            room_events: room_event_rx,
         }
     }
 
     pub async fn reset_rooms(&self) {
+        let _ = self.room_events.send(RoomEvent::RoomDispatcherCreated());
         self.chat_rooms.reset_state().await;
         self.float_rooms.reset_state().await;
         self.audio_rooms.reset_state().await;
@@ -89,6 +100,8 @@ impl AppState {
 
 pub struct RoomMap {
     pub map: Arc<RwLock<HashMap<String, Arc<RwLock<BroadcastRoom>>>>>,
+
+    room_events: tokio::sync::broadcast::Sender<RoomEvent>,
 }
 
 pub trait RoomMapTrait {
@@ -123,6 +136,9 @@ impl RoomMapTrait for RoomMap {
     }
 
     async fn insert_room(&self, room_name: &str, room: Arc<RwLock<BroadcastRoom>>) {
+        let _ = self
+            .room_events
+            .send(RoomEvent::BroadcastRoomCreated(room.clone()));
         self.map.write().await.insert(room_name.to_string(), room);
     }
 
@@ -161,9 +177,12 @@ impl RoomMapTrait for RoomMap {
         password: &str,
     ) -> anyhow::Result<String> {
         if let Some(room) = self.map.read().await.get(room_name).cloned() {
-            let room = room.read().await;
-            if room.meta().admin_password == password {
-                room.replace_sender(offer, password).await
+            // let room_clone = room.clone();
+            if room.read().await.meta().admin_password == password {
+                let _ = self
+                    .room_events
+                    .send(RoomEvent::BroadcastRoomUpdated(room.clone()));
+                room.write().await.replace_sender(offer, password).await
             } else {
                 return Err(anyhow::anyhow!("Password does not match"));
             }

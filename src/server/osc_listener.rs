@@ -1,3 +1,4 @@
+use std::sync::Arc;
 use std::{io, net::SocketAddr, time::Duration};
 
 use axum::async_trait;
@@ -13,14 +14,17 @@ use tokio_util::codec::{Decoder, Encoder, FramedRead, FramedWrite};
 use tower::Service;
 use tracing::{debug, error, instrument, Instrument};
 
-#[instrument(skip(socket))]
-pub async fn handle_osc_client(socket: TcpStream, addr: SocketAddr) {
+use crate::state::AppState;
+
+#[instrument(skip(socket, state))]
+pub async fn handle_osc_client(socket: TcpStream, addr: SocketAddr, state: Arc<AppState>) {
     let (reader, writer) = socket.into_split();
     let mut framed_reader = FramedRead::new(reader, OscDecoder);
     let mut framed_writer = FramedWrite::new(writer, OscEncoder);
 
     let (tx_outgoing_osc, mut rx_outgoing_osc) = mpsc::channel::<OscPacket>(16);
     let tx_outgoing_ping_osc = tx_outgoing_osc.clone();
+    let mut room_events_rx = state.room_events.clone().subscribe();
 
     let (connection_closed_sender, _) = broadcast::channel::<()>(1);
 
@@ -82,9 +86,15 @@ pub async fn handle_osc_client(socket: TcpStream, addr: SocketAddr) {
         tokio::spawn(async move {
             loop {
                 tokio::select! {
+
                     _ = connection_closed_receiver.recv() => {
                         debug!("Connection closed signal received in ping task");
                         break;
+                    },
+                    Ok(room_event) = room_events_rx.recv() => {
+                        if tx_outgoing_ping_osc.send(room_event.into_osc_packet().await).await.is_err() {
+                            break;
+                        }
                     },
                     _ = tokio::time::sleep(Duration::from_secs(1)) => {
                         let message = OscPacket::Message(OscMessage { addr: "/ping".to_string(), args: vec![] });
