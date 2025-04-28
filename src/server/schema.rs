@@ -11,7 +11,10 @@ use rand::distributions::{Alphanumeric, DistString};
 
 use anyhow::anyhow;
 use shared::models::API_VERSION;
-use tokio::{sync::Mutex, time::sleep};
+use tokio::{
+    sync::{Mutex, RwLock},
+    time::sleep,
+};
 
 use async_graphql::{Context, Object};
 use tracing::{info, instrument, trace, Instrument, Span};
@@ -41,7 +44,7 @@ impl Query {
         let state = ctx.data_unchecked::<Arc<AppState>>();
         state
             .room_dispatchers
-            .lock()
+            .read()
             .await
             .values()
             .map(|x| x.clone())
@@ -112,19 +115,18 @@ impl Mutation {
                     let mut room_lock = match room_type {
                         RoomType::Float => {
                             info!("Created a float room");
-                            state.float_rooms.map.lock().await
+                            state.float_rooms.map.write().await
                         }
                         RoomType::Chat => {
                             info!("Created a chat room");
-                            state.chat_rooms.map.lock().await
+                            state.chat_rooms.map.write().await
                         }
                         RoomType::Audio => {
                             todo!("This can not happen - can we inherit the types from above?")
                         }
                     };
-                    let room_mutex =
-                        Arc::new(Mutex::new(BroadcastRoom::Data(result.broadcast_room)));
-                    room_lock.insert(name2, room_mutex.clone());
+                    let room = Arc::new(RwLock::new(BroadcastRoom::Data(result.broadcast_room)));
+                    room_lock.insert(name2, room.clone());
                 }
                 Ok(RoomCreationReply {
                     offer: result.offer,
@@ -137,7 +139,7 @@ impl Mutation {
                     .await?;
                 {
                     let mut room_lock = match room_type {
-                        RoomType::Audio => state.audio_rooms.map.lock().await,
+                        RoomType::Audio => state.audio_rooms.map.write().await,
                         _ => {
                             todo!("This can not happen - can we inherit the types from above?")
                         }
@@ -149,13 +151,13 @@ impl Mutation {
                         .sequence_number_receiver
                         .clone();
 
-                    let room_mutex = Arc::new(Mutex::new(BroadcastRoom::Audio(
+                    let room = Arc::new(RwLock::new(BroadcastRoom::Audio(
                         result.audio_broadcast_room,
                     )));
                     let name3 = name2.clone();
-                    room_lock.insert(name2, room_mutex.clone());
+                    room_lock.insert(name2, room.clone());
 
-                    let audio_room_mutex = state.audio_rooms.map.clone();
+                    let audio_room = state.audio_rooms.map.clone();
 
                     tokio::spawn(async move {
                         loop {
@@ -167,7 +169,7 @@ impl Mutation {
                                 }
                             }
                         }
-                        let mut audio_room_mutex_lock = audio_room_mutex.lock().await;
+                        let mut audio_room_mutex_lock = audio_room.write().await;
                         audio_room_mutex_lock.remove(&name3);
                         info!("Cleared room");
                     }
@@ -196,7 +198,7 @@ impl Mutation {
         let room_dispatcher: RoomDispatcher = dispatcher.into();
         let state = ctx.data_unchecked::<Arc<AppState>>();
 
-        if let Some(existing_dispatcher) = state.room_dispatchers.lock().await.get_mut(&name) {
+        if let Some(existing_dispatcher) = state.room_dispatchers.write().await.get_mut(&name) {
             if let Some(pw) = admin_password {
                 if pw == existing_dispatcher.admin_password {
                     existing_dispatcher.rule = room_dispatcher.rule;
@@ -218,7 +220,7 @@ impl Mutation {
 
         state
             .room_dispatchers
-            .lock()
+            .write()
             .await
             .insert(room_dispatcher.name.clone(), room_dispatcher.clone());
         info!("Created a new dispatcher");
@@ -235,7 +237,7 @@ impl Mutation {
                     }
                 }
                 info!("Dispatcher timed out - will be deleted now");
-                dispatcher_map_lock.lock().await.remove(&name2);
+                dispatcher_map_lock.write().await.remove(&name2);
             }
             .in_current_span(),
         );
@@ -259,27 +261,27 @@ impl Mutation {
         let state = ctx.data_unchecked::<Arc<AppState>>();
 
         match room_type {
-            RoomType::Float => match state.float_rooms.map.lock().await.get(&name) {
+            RoomType::Float => match state.float_rooms.map.read().await.get(&name) {
                 Some(broadcast_room) => Ok(broadcast_room
-                    .lock()
+                    .read()
                     .await
                     .join_room(&offer)
                     .instrument(Span::current())
                     .await?),
                 None => Err(anyhow!("No such room {name}")),
             },
-            RoomType::Chat => match state.chat_rooms.map.lock().await.get(&name) {
+            RoomType::Chat => match state.chat_rooms.map.read().await.get(&name) {
                 Some(broadcast_room) => Ok(broadcast_room
-                    .lock()
+                    .read()
                     .await
                     .join_room(&offer)
                     .instrument(Span::current())
                     .await?),
                 None => Err(anyhow!("No such room {name}")),
             },
-            RoomType::Audio => match state.audio_rooms.map.lock().await.get(&name) {
+            RoomType::Audio => match state.audio_rooms.map.read().await.get(&name) {
                 Some(broadcast_room) => Ok(broadcast_room
-                    .lock()
+                    .read()
                     .await
                     .join_room(&offer)
                     .instrument(Span::current())
@@ -292,7 +294,7 @@ impl Mutation {
     async fn access_dispatcher<'a>(&self, ctx: &Context<'a>, name: String) -> anyhow::Result<Room> {
         let state = ctx.data_unchecked::<Arc<AppState>>();
 
-        if let Some(dispatcher) = state.room_dispatchers.lock().await.get(&name) {
+        if let Some(dispatcher) = state.room_dispatchers.read().await.get(&name) {
             match dispatcher.room_type {
                 RoomType::Float => todo!(),
                 RoomType::Chat => todo!(),

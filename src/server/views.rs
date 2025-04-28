@@ -41,11 +41,11 @@ pub async fn stream_view(
     State(state): State<Arc<AppState>>,
     Path(room_name): Path<String>,
 ) -> Html<String> {
-    let map_guard = state.audio_rooms.map.lock().await;
-    let room_value = map_guard.get(&room_name);
+    let room_guard = state.audio_rooms.map.read().await;
+    let room_value = room_guard.get(&room_name);
 
     let room_name = room_value
-        .map(async |room| room.lock().await.meta().name.to_owned())
+        .map(async |room| room.read().await.meta().name.to_owned())
         .expect("failed to access rooms")
         .await;
 
@@ -66,7 +66,7 @@ pub async fn dispatcher_view(
     State(state): State<Arc<AppState>>,
     Path(dispatcher_name): Path<String>,
 ) -> Result<impl axum::response::IntoResponse, axum::http::StatusCode> {
-    if let Some(dispatcher) = state.room_dispatchers.lock().await.get(&dispatcher_name) {
+    if let Some(dispatcher) = state.room_dispatchers.read().await.get(&dispatcher_name) {
         match dispatcher.room_type {
             crate::models::RoomType::Float => todo!(),
             crate::models::RoomType::Chat => todo!(),
