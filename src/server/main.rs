@@ -12,6 +12,7 @@ use crate::views::DebugTemplate;
 use async_graphql::extensions::Tracing;
 use async_graphql::{http::GraphiQLSource, EmptySubscription, Schema};
 use async_graphql_axum::GraphQL;
+use axum::routing::get_service;
 use axum::{
     response::{self, IntoResponse},
     routing::get,
@@ -21,7 +22,7 @@ use clap::Parser;
 use osc_listener::handle_osc_client;
 use state::AppState;
 use tokio::net::TcpListener;
-use tower_http::services::ServeDir;
+use tower_http::services::{ServeDir, ServeFile};
 use tracing::{debug, error, info, Level};
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
@@ -75,15 +76,11 @@ async fn main() {
 
     let http_app = Router::new()
         .route("/graphql", get(graphiql).post_service(GraphQL::new(schema)))
-        .nest_service(
-            "/s/:name",
-            ServeFile::new(templates_dir.join("stream.html")),
-        )
-        .nest_service(
-            "/d/:name",
-            ServeFile::new(templates_dir.join("dispatcher.html")),
-        )
-        .nest_service("/", ServeDir::new(templates_dir));
+        .nest_service("/static", get_service(ServeDir::new("./static")))
+        .route("/debug", get(async || DebugTemplate {}))
+        .route("/s/:name", get(stream_view))
+        .route("/d/:name", get(dispatcher_view))
+        .with_state(state.clone());
 
     let http_handle = tokio::spawn(async move {
         info!("Start http serving on http://{}:{}", args.host, args.port);
