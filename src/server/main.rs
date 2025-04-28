@@ -1,4 +1,5 @@
 pub mod models;
+pub mod osc_listener;
 pub mod schema;
 pub mod state;
 pub mod views;
@@ -16,10 +17,11 @@ use axum::{
     Router,
 };
 use clap::Parser;
+use osc_listener::handle_osc_client;
 use state::AppState;
 use tokio::net::TcpListener;
 use tower_http::services::ServeDir;
-use tracing::Level;
+use tracing::{debug, error, info, Level};
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::{self, filter};
@@ -34,9 +36,13 @@ struct Cli {
     #[arg(long, default_value_t=LOCAL_HOST.to_string())]
     host: String,
 
-    /// interface to listen on
+    /// http port to listen on
     #[arg(long, default_value_t = 8000)]
     port: u16,
+
+    /// tcp osc port to listen on
+    #[arg(long, default_value_t = 8001)]
+    osc_port: u16,
 }
 
 async fn graphiql() -> impl IntoResponse {
@@ -64,7 +70,9 @@ async fn main() {
         .extension(Tracing)
         .finish();
 
-    let app = Router::new()
+    let host2 = args.host.clone();
+
+    let http_app = Router::new()
         .route("/graphql", get(graphiql).post_service(GraphQL::new(schema)))
         .nest_service("/static", ServeDir::new("static"))
         .route("/debug", get(debug_view))
@@ -72,11 +80,30 @@ async fn main() {
         .route("/d/:name", get(dispatcher_view))
         .with_state(state.clone());
 
-    println!("Start serving on http://{}:{}", args.host, args.port);
-    axum::serve(
-        TcpListener::bind((args.host, args.port)).await.unwrap(),
-        app,
-    )
-    .await
-    .unwrap();
+    let http_handle = tokio::spawn(async move {
+        info!("Start http serving on http://{}:{}", args.host, args.port);
+        axum::serve(
+            TcpListener::bind((args.host, args.port)).await.unwrap(),
+            http_app,
+        )
+        .await
+    });
+
+    let osc_app = tokio::spawn(async move {
+        info!("Start TCP-OSC serving on {}:{}", host2, args.osc_port);
+        let tcp_osc_listener = tokio::net::TcpListener::bind((host2, args.osc_port))
+            .await
+            .unwrap();
+        loop {
+            match tcp_osc_listener.accept().await {
+                Ok((osc_socket, addr)) => {
+                    debug!("New OSC connection from {:?}:{:?}", addr.ip(), addr.port());
+                    tokio::spawn(async move { handle_osc_client(osc_socket, addr).await });
+                }
+                Err(e) => error!("TCP-OSC connection failed: {:?}", e),
+            }
+        }
+    });
+
+    let _ = tokio::join!(http_handle, osc_app,);
 }
