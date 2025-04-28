@@ -2,7 +2,7 @@ use futures::stream::{self, StreamExt};
 use std::{collections::HashMap, future::Future, sync::Arc};
 
 use rand::{rngs::StdRng, seq::SliceRandom, SeedableRng};
-use tokio::sync::Mutex;
+use tokio::sync::RwLock;
 
 use crate::models::{BroadcastRoom, Room, RoomDispatcher, RoomType};
 
@@ -10,22 +10,22 @@ pub struct AppState {
     pub float_rooms: RoomMap,
     pub chat_rooms: RoomMap,
     pub audio_rooms: RoomMap,
-    pub room_dispatchers: Arc<Mutex<HashMap<String, RoomDispatcher>>>,
+    pub room_dispatchers: Arc<RwLock<HashMap<String, RoomDispatcher>>>,
 }
 
 impl AppState {
     pub fn new() -> Self {
         Self {
             float_rooms: RoomMap {
-                map: Arc::new(Mutex::new(HashMap::new())),
+                map: Arc::new(RwLock::new(HashMap::new())),
             },
             chat_rooms: RoomMap {
-                map: Arc::new(Mutex::new(HashMap::new())),
+                map: Arc::new(RwLock::new(HashMap::new())),
             },
             audio_rooms: RoomMap {
-                map: Arc::new(Mutex::new(HashMap::new())),
+                map: Arc::new(RwLock::new(HashMap::new())),
             },
-            room_dispatchers: Arc::new(Mutex::new(HashMap::new())),
+            room_dispatchers: Arc::new(RwLock::new(HashMap::new())),
         }
     }
 
@@ -88,7 +88,7 @@ impl AppState {
 }
 
 pub struct RoomMap {
-    pub map: Arc<Mutex<HashMap<String, Arc<Mutex<BroadcastRoom>>>>>,
+    pub map: Arc<RwLock<HashMap<String, Arc<RwLock<BroadcastRoom>>>>>,
 }
 
 pub trait RoomMapTrait {
@@ -96,7 +96,7 @@ pub trait RoomMapTrait {
     fn insert_room(
         &self,
         room_name: &str,
-        room: Arc<Mutex<BroadcastRoom>>,
+        room: Arc<RwLock<BroadcastRoom>>,
     ) -> impl Future<Output = ()>;
     fn room_exists(&self, room_name: &str) -> impl Future<Output = bool>;
     fn get_rooms(&self) -> impl Future<Output = Vec<Room>>;
@@ -118,36 +118,40 @@ pub trait RoomMapTrait {
 
 impl RoomMapTrait for RoomMap {
     async fn reset_state(&self) {
-        let mut map_lock = self.map.lock().await;
+        let mut map_lock = self.map.write().await;
         *map_lock = HashMap::new();
     }
 
-    async fn insert_room(&self, room_name: &str, room: Arc<Mutex<BroadcastRoom>>) {
-        self.map.lock().await.insert(room_name.to_string(), room);
+    async fn insert_room(&self, room_name: &str, room: Arc<RwLock<BroadcastRoom>>) {
+        self.map.write().await.insert(room_name.to_string(), room);
     }
 
     async fn room_exists(&self, room_name: &str) -> bool {
-        self.map.lock().await.contains_key(room_name)
+        self.map.read().await.contains_key(room_name)
     }
 
     async fn room_password_match(&self, room_name: &str, password: &str) -> bool {
-        if let Some(room) = self.map.lock().await.get(room_name) {
-            room.lock().await.meta().admin_password == password
+        if let Some(room) = self.map.read().await.get(room_name) {
+            room.read().await.meta().admin_password == password
         } else {
             false
         }
     }
 
     async fn get_rooms(&self) -> Vec<Room> {
-        let map_lock = self.map.lock().await;
+        let rooms: Vec<_> = {
+            let map_lock = self.map.read().await;
+            map_lock.values().cloned().collect()
+        };
 
-        let mut rooms: Vec<Room> = Vec::with_capacity(map_lock.len());
-        for (_, room_arc) in map_lock.iter() {
-            let room_lock = room_arc.lock().await;
-            let room: Room = (&*room_lock).into();
-            rooms.push(room.clone());
+        let mut result = Vec::with_capacity(rooms.len());
+
+        for room in rooms {
+            let room_lock = room.read().await;
+            result.push((&*room_lock).into());
         }
-        rooms
+
+        result
     }
 
     async fn replace_sender(
@@ -156,10 +160,10 @@ impl RoomMapTrait for RoomMap {
         offer: &str,
         password: &str,
     ) -> anyhow::Result<String> {
-        // @todo why doesn't this work?
-        if let Some(room) = self.map.lock().await.get(room_name) {
-            if room.lock().await.meta().admin_password == password {
-                room.lock().await.replace_sender(offer, password).await
+        if let Some(room) = self.map.read().await.get(room_name).cloned() {
+            let room = room.read().await;
+            if room.meta().admin_password == password {
+                room.replace_sender(offer, password).await
             } else {
                 return Err(anyhow::anyhow!("Password does not match"));
             }
@@ -169,12 +173,12 @@ impl RoomMapTrait for RoomMap {
     }
 
     async fn get_room(&self, dispatcher: &RoomDispatcher) -> anyhow::Result<Room> {
-        let rooms_guard = self.map.lock().await;
+        let rooms_guard = self.map.read().await;
 
         // is this the proper way to do this?
         let matched_rooms: Vec<_> = stream::iter(rooms_guard.values())
             .filter_map(|room| async {
-                let room_guard = room.lock().await;
+                let room_guard = room.read().await;
                 if dispatcher.rule.is_match(&room_guard.meta().name) {
                     Some(room.clone())
                 } else {
@@ -187,7 +191,7 @@ impl RoomMapTrait for RoomMap {
         match dispatcher.dispatcher_type {
             crate::models::DispatcherType::Random => {
                 if let Some(room) = matched_rooms.choose(&mut StdRng::from_entropy()) {
-                    let room_lock = room.lock().await;
+                    let room_lock = room.read().await;
                     return Ok((&*room_lock).into());
                 } else {
                     return Err(anyhow::anyhow!("Did not match any room"));
