@@ -1,0 +1,30 @@
+{% extends "base.html.jinja" %}
+
+{% block content %}
+
+{% if let Some(room) = self.room %}
+    <h2>{{ room.name }}</h2>
+
+    <p>
+        <button
+            class="button"
+            @click="$store.stecker.joinRoom('{{ room.name }}', 'AUDIO')"
+            x-bind:disabled="$store.stecker.connectedRoom"
+        >
+            Start playing
+        </button>
+    </p>
+
+    <p>
+        <div class="field">
+            <label class="label">Audio</label>
+            <div class="control">
+                <audio controls style="width: 100%;" id="audio-player"></audio>
+            </div>
+        </div>
+    </p>
+{% else %}
+    <p>Room does not exist.</p>
+{% endif %}
+
+{% endblock %}

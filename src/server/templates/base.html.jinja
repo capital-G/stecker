@@ -1,0 +1,19 @@
+<!DOCTYPE html>
+
+<head>
+    <title>{% block title %}Stecker{% endblock %}</title>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <script src="//unpkg.com/alpinejs"></script>
+    <script src="/static/stecker.js"></script>
+    <link rel="stylesheet" href="/static/style.css" />
+    {% block script %}{% endblock %}
+</head>
+
+<body>
+    <div class="content container" x-data>
+        {% block content %}
+        {% endblock %}
+    </div>
+</body>
+</html>

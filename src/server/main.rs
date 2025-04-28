@@ -1,10 +1,12 @@
 pub mod models;
 pub mod schema;
 pub mod state;
+pub mod views;
 
-use std::path::PathBuf;
+use std::sync::Arc;
 
 use crate::schema::{Mutation, Query};
+use crate::views::DebugTemplate;
 
 use async_graphql::extensions::Tracing;
 use async_graphql::{http::GraphiQLSource, EmptySubscription, Schema};
@@ -17,11 +19,12 @@ use axum::{
 use clap::Parser;
 use state::AppState;
 use tokio::net::TcpListener;
-use tower_http::services::{ServeDir, ServeFile};
+use tower_http::services::ServeDir;
 use tracing::Level;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::{self, filter};
+use views::{dispatcher_view, stream_view};
 
 const LOCAL_HOST: &str = "127.0.0.1";
 
@@ -55,24 +58,20 @@ async fn main() {
         .with(filter)
         .init();
 
+    let state = Arc::new(AppState::new());
+
     let schema = Schema::build(Query, Mutation, EmptySubscription)
-        .data(AppState::new())
+        .data(state.clone())
         .extension(Tracing)
         .finish();
 
-    let templates_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("templates");
-
     let app = Router::new()
         .route("/graphql", get(graphiql).post_service(GraphQL::new(schema)))
-        .nest_service(
-            "/s/:name",
-            ServeFile::new(templates_dir.join("stream.html")),
-        )
-        .nest_service(
-            "/d/:name",
-            ServeFile::new(templates_dir.join("dispatcher.html")),
-        )
-        .nest_service("/", ServeDir::new(templates_dir));
+        .nest_service("/static", ServeDir::new("static"))
+        .route("/debug", get(async || DebugTemplate {}))
+        .route("/s/:name", get(stream_view))
+        .route("/d/:name", get(dispatcher_view))
+        .with_state(state.clone());
 
     println!("Start serving on http://{}:{}", args.host, args.port);
     axum::serve(
