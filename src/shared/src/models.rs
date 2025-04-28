@@ -15,7 +15,7 @@ use webrtc::{
 pub static API_VERSION: &'static str = "0.1.0";
 
 /// the possible kinds of data rooms used
-#[derive(Copy, Clone, Eq, PartialEq)]
+#[derive(Copy, Clone, Eq, PartialEq, Debug)]
 pub enum DataRoomInternalType {
     Float,
     Chat,
@@ -168,7 +168,7 @@ impl DataChannelMap {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct SteckerAudioChannel {
     // channel which we use to receive a pushed audio channel
     pub audio_channel_rx: tokio::sync::watch::Receiver<Option<Arc<TrackLocalStaticRTP>>>,

@@ -103,6 +103,7 @@ impl Display for RoomType {
     }
 }
 
+#[derive(Debug)]
 pub enum BroadcastRoom {
     Data(DataBroadcastRoom),
     Audio(AudioBroadcastRoom),
@@ -136,6 +137,7 @@ impl BroadcastRoom {
     }
 }
 
+#[derive(Debug)]
 pub struct BroadcastRoomMeta {
     pub name: String,
     pub uuid: Uuid,
@@ -172,7 +174,7 @@ pub struct Room {
 }
 
 // server state objects
-// #[derive(Clone)]
+#[derive(Debug)]
 pub struct DataBroadcastRoom {
     pub meta: BroadcastRoomMeta,
     /// Reply to server (messages not broadcasted)
@@ -391,6 +393,7 @@ impl From<&BroadcastRoom> for Room {
     }
 }
 
+#[derive(Debug)]
 pub struct AudioBroadcastRoom {
     pub meta: BroadcastRoomMeta,
     pub stecker_audio_channel: SteckerAudioChannel,
