@@ -9,6 +9,11 @@ use serde_json::json;
 use tracing::{error, instrument, trace};
 use webrtc::peer_connection::sdp::session_description::RTCSessionDescription;
 
+/*
+This is located in the shared directory so we can share common
+data types between client and server through JSON.
+*/
+
 #[derive(Deserialize, Debug)]
 struct GQLResponse<T> {
     data: T,

@@ -2,8 +2,10 @@ use std::{sync::Arc, time::Duration};
 
 use crate::{
     models::{
-        AudioBroadcastRoom, BroadcastRoom, DataBroadcastRoom, Room, RoomCreationReply,
-        RoomDispatcher, RoomDispatcherInput, RoomType,
+        audio_broadcast_room::AudioBroadcastRoom,
+        data_broadcast_room::DataBroadcastRoom,
+        dispatcher::{RoomDispatcher, RoomDispatcherInput},
+        room::{BroadcastRoom, Room, RoomCreationReply, RoomType},
     },
     state::RoomMapTrait,
 };

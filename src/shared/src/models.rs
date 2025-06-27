@@ -1,7 +1,7 @@
 use std::{
     collections::HashMap,
     fmt::Display,
-    sync::{Arc, Mutex},
+    sync::{Arc, Mutex, RwLock},
 };
 
 use bytes::{Buf, BufMut, Bytes, BytesMut};
@@ -16,27 +16,27 @@ pub static API_VERSION: &'static str = "0.1.0";
 
 /// the possible kinds of data rooms used
 #[derive(Copy, Clone, Eq, PartialEq, Debug)]
-pub enum DataRoomInternalType {
+pub enum DataRoomType {
     Float,
     Chat,
     Meta,
 }
 
 /// the possible kinds of data channels
-/// that are usable for the public
-/// via the server.
+/// that are exposed for using via the server or the client.
 #[derive(Copy, Clone)]
-pub enum DataRoomPublicType {
+pub enum DataRoomData {
     Float,
     Chat,
 }
 
-/// the "raw" possible kinds of data channels
-/// which will be used internally
-#[derive(Clone, Copy)]
-pub(crate) enum SteckerDataChannelType {
-    Float,
-    String,
+impl From<SteckerDataChannelType> for DataRoomInternalType {
+    fn from(value: SteckerDataChannelType) -> Self {
+        match value {
+            SteckerDataChannelType::Float => DataRoomInternalType::Float,
+            SteckerDataChannelType::String => DataRoomInternalType::Chat,
+        }
+    }
 }
 
 pub enum SteckerAPIRoomType {
@@ -73,14 +73,29 @@ impl Display for DataRoomInternalType {
     }
 }
 
-#[derive(Clone)]
-pub struct SteckerDataChannel {
-    /// messages received from data channel are inbound,
-    pub inbound: Sender<SteckerData>,
+#[derive(Clone, Debug)]
+pub enum ConnectionState {
+    WaitingForConnection,
+    Connected,
+    Timeout,
+}
+
+#[derive(Clone, Debug)]
+pub enum SteckerDataChannelEvent {
+    /// messages received from data channel are inbound
+    InboundMessage(SteckerData),
     /// messages send to data channel are outbound
-    pub outbound: Sender<SteckerData>,
-    /// triggers when connection was closed
-    pub close: Sender<()>,
+    OutboundMessage(SteckerData),
+    ConnectionClosed,
+}
+
+#[derive(Clone)]
+/// Acts as an abstraction
+pub struct SteckerDataChannel {
+    /// label of the data channel
+    // @todo is this obsolete b/c we have channel type?
+    pub label: String,
+    pub events: Sender<SteckerDataChannelEvent>,
     // necessary for async matching via listening
     // on data channels.
     pub channel_type: SteckerDataChannelType,
@@ -88,16 +103,10 @@ pub struct SteckerDataChannel {
 
 impl SteckerDataChannel {
     pub fn create_channels(channel_type: SteckerDataChannelType) -> Self {
-        let capacity: usize = 1024;
-
-        let (inbound, _) = broadcast::channel::<SteckerData>(capacity);
-        let (outbound, _) = broadcast::channel::<SteckerData>(capacity);
-        let (close, _) = broadcast::channel::<()>(1);
-
+        let (events, _) = broadcast::channel::<SteckerDataChannelEvent>(64);
         SteckerDataChannel {
-            inbound,
-            outbound,
-            close,
+            label: ChannelName::from(&DataRoomInternalType::from(channel_type)),
+            events,
             channel_type,
         }
     }
@@ -127,8 +136,17 @@ impl SteckerData {
         Ok(Self::F32(Bytes::get_f32(&mut b)))
     }
 
+    pub fn to_float(data: DataChannelMessage) -> f32 {
+        let mut b = data.data.clone();
+        Bytes::get_f32(&mut b)
+    }
+
     pub fn decode_string(data: DataChannelMessage) -> anyhow::Result<SteckerData> {
         Ok(Self::String(String::from_utf8(data.data.to_vec())?))
+    }
+
+    pub fn to_string(data: DataChannelMessage) -> String {
+        unsafe { String::from_utf8_unchecked(data.data.to_vec()) }
     }
 }
 
@@ -153,31 +171,31 @@ impl From<&DataRoomInternalType> for ChannelName {
     }
 }
 
-pub struct DataChannelMap(pub Mutex<HashMap<String, Arc<SteckerDataChannel>>>);
+pub struct DataChannelMap(pub RwLock<HashMap<String, Arc<SteckerDataChannel>>>);
 
 impl DataChannelMap {
     pub fn insert(&self, channel_name: &str, stecker_channel: Arc<SteckerDataChannel>) {
         self.0
-            .lock()
+            .write()
             .unwrap()
             .insert(channel_name.to_string(), stecker_channel);
     }
 
     pub fn get(&self, channel_name: &str) -> Option<Arc<SteckerDataChannel>> {
-        self.0.lock().unwrap().get(channel_name).map(|a| a.clone())
+        self.0.read().unwrap().get(channel_name).map(|a| a.clone())
     }
 }
 
+pub enum SteckerAudioChannelEvent {}
+
 #[derive(Clone, Debug)]
 pub struct SteckerAudioChannel {
-    // channel which we use to receive a pushed audio channel
+    // channel which we use to store the current audio channel from which we receive
     pub audio_channel_rx: tokio::sync::watch::Receiver<Option<Arc<TrackLocalStaticRTP>>>,
     // channel which we use to push an audio channel to our consumers
-    pub audio_channel_tx: tokio::sync::watch::Sender<Option<Arc<TrackLocalStaticRTP>>>,
-    // sends a signal if the connection was closed by our peer
-    pub close: Sender<()>,
+    audio_channel_tx: tokio::sync::watch::Sender<Option<Arc<TrackLocalStaticRTP>>>,
     // drops the current source WebRTC connection so it can be replaced by a new one
-    pub reset_sender: Sender<()>,
+    // pub reset_sender: Sender<()>,
     // if we want to replace a running sender, we also need to continue the sequence_number
     // of the RTP packages
     pub sequence_number_sender: tokio::sync::watch::Sender<u16>,
@@ -186,19 +204,25 @@ pub struct SteckerAudioChannel {
 }
 
 impl SteckerAudioChannel {
-    pub fn create_channels() -> Self {
-        let (close, _) = broadcast::channel::<()>(1);
+    pub fn new() -> Self {
+        // let (close, _) = broadcast::channel::<()>(1);
         let (audio_channel_tx, audio_channel_rx) = tokio::sync::watch::channel(None);
-        let (reset_sender, _) = broadcast::channel::<()>(1);
+        // let (reset_sender, _) = broadcast::channel::<()>(1);
         let (sequence_number_sender, sequence_number_receiver) =
             tokio::sync::watch::channel::<u16>(0);
         SteckerAudioChannel {
             audio_channel_tx,
             audio_channel_rx,
-            close,
-            reset_sender,
+            // close,
+            // reset_sender,
             sequence_number_sender,
             sequence_number_receiver,
         }
+    }
+
+    pub fn listen_for_audio_channel() {}
+
+    pub fn change_sender(&self, track: Arc<TrackLocalStaticRTP>) {
+        let _ = self.audio_channel_tx.send(Some(track));
     }
 }

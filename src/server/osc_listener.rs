@@ -92,7 +92,8 @@ pub async fn handle_osc_client(socket: TcpStream, addr: SocketAddr, state: Arc<A
                         break;
                     },
                     Ok(room_event) = room_events_rx.recv() => {
-                        if tx_outgoing_ping_osc.send(room_event.into_osc_packet().await).await.is_err() {
+                        // @todo do not unwrap here!!!
+                        if tx_outgoing_ping_osc.send(room_event.into_osc_packet().await.unwrap()).await.is_err() {
                             break;
                         }
                     },

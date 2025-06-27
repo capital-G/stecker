@@ -10,7 +10,10 @@ use axum::{
 };
 use tracing::error;
 
-use crate::state::{AppState, RoomMapTrait};
+use crate::{
+    models::room::RoomType,
+    state::{AppState, RoomMapTrait},
+};
 
 #[derive(Template, WebTemplate)]
 #[template(path = "debug.html.jinja")]
@@ -63,9 +66,9 @@ pub async fn dispatcher_view(
 ) -> Result<impl axum::response::IntoResponse, axum::http::StatusCode> {
     if let Some(dispatcher) = state.room_dispatchers.read().await.get(&dispatcher_name) {
         match dispatcher.room_type {
-            crate::models::RoomType::Float => todo!(),
-            crate::models::RoomType::Chat => todo!(),
-            crate::models::RoomType::Audio => {
+            RoomType::Float => todo!(),
+            RoomType::Chat => todo!(),
+            RoomType::Audio => {
                 let room_result = state.audio_rooms.get_room(dispatcher).await;
                 match room_result {
                     Ok(room) => {

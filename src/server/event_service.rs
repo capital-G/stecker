@@ -3,45 +3,49 @@ use std::sync::Arc;
 use rosc::{OscMessage, OscPacket};
 use tokio::sync::RwLock;
 
-use crate::models::BroadcastRoom;
+use crate::models::room::BroadcastRoom;
 
-#[derive(Debug, Clone)]
-pub enum RoomEvent {
+#[derive(Clone)]
+pub enum SteckerServerEvent {
     BroadcastRoomCreated(Arc<RwLock<BroadcastRoom>>),
     BroadcastRoomUpdated(Arc<RwLock<BroadcastRoom>>),
     BroadcastRoomDeleted(String),
 
+    BroadcastRoomUserJoined(Arc<RwLock<BroadcastRoom>>),
+    BroadcastRoomUserLeft(Arc<RwLock<BroadcastRoom>>),
+
     RoomDispatcherCreated(),
 }
 
-impl RoomEvent {
-    pub async fn into_osc_packet(self) -> OscPacket {
+impl SteckerServerEvent {
+    pub async fn into_osc_packet(self) -> Option<OscPacket> {
         match self {
-            RoomEvent::BroadcastRoomCreated(room) => {
+            SteckerServerEvent::BroadcastRoomCreated(room) => {
                 let room_name = rosc::OscType::String(room.read().await.meta().name.clone());
-                OscPacket::Message(OscMessage {
+                Some(OscPacket::Message(OscMessage {
                     addr: "/room/created".to_string(),
                     args: vec![room_name],
-                })
+                }))
             }
-            RoomEvent::BroadcastRoomUpdated(room) => {
+            SteckerServerEvent::BroadcastRoomUpdated(room) => {
                 let room_name = rosc::OscType::String(room.read().await.meta().name.clone());
-                OscPacket::Message(OscMessage {
+                Some(OscPacket::Message(OscMessage {
                     addr: "/room/update".to_string(),
                     args: vec![room_name],
-                })
+                }))
             }
-            RoomEvent::BroadcastRoomDeleted(name) => {
+            SteckerServerEvent::BroadcastRoomDeleted(name) => {
                 let room_name = rosc::OscType::String(name);
-                OscPacket::Message(OscMessage {
+                Some(OscPacket::Message(OscMessage {
                     addr: "/room/deleted".to_string(),
                     args: vec![room_name],
-                })
+                }))
             }
-            RoomEvent::RoomDispatcherCreated() => OscPacket::Message(OscMessage {
+            SteckerServerEvent::RoomDispatcherCreated() => Some(OscPacket::Message(OscMessage {
                 addr: "/dispatcher/created".to_string(),
                 args: vec![],
-            }),
+            })),
+            _ => None,
         }
     }
 }

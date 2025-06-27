@@ -5,8 +5,11 @@ use rand::{rngs::StdRng, seq::SliceRandom, SeedableRng};
 use tokio::sync::RwLock;
 
 use crate::{
-    event_service::RoomEvent,
-    models::{BroadcastRoom, Room, RoomDispatcher, RoomType},
+    event_service::SteckerServerEvent,
+    models::{
+        dispatcher::{DispatcherType, RoomDispatcher},
+        room::{BroadcastRoom, Room, RoomType},
+    },
 };
 
 pub struct AppState {
@@ -15,7 +18,7 @@ pub struct AppState {
     pub audio_rooms: RoomMap,
     pub room_dispatchers: Arc<RwLock<HashMap<String, RoomDispatcher>>>,
 
-    pub room_events: tokio::sync::broadcast::Sender<RoomEvent>,
+    pub room_events: tokio::sync::broadcast::Sender<SteckerServerEvent>,
 }
 
 impl AppState {
@@ -40,7 +43,9 @@ impl AppState {
     }
 
     pub async fn reset_rooms(&self) {
-        let _ = self.room_events.send(RoomEvent::RoomDispatcherCreated());
+        let _ = self
+            .room_events
+            .send(SteckerServerEvent::RoomDispatcherCreated());
         self.chat_rooms.reset_state().await;
         self.float_rooms.reset_state().await;
         self.audio_rooms.reset_state().await;
@@ -101,7 +106,7 @@ impl AppState {
 pub struct RoomMap {
     pub map: Arc<RwLock<HashMap<String, Arc<RwLock<BroadcastRoom>>>>>,
 
-    room_events: tokio::sync::broadcast::Sender<RoomEvent>,
+    room_events: tokio::sync::broadcast::Sender<SteckerServerEvent>,
 }
 
 pub trait RoomMapTrait {
@@ -138,7 +143,7 @@ impl RoomMapTrait for RoomMap {
     async fn insert_room(&self, room_name: &str, room: Arc<RwLock<BroadcastRoom>>) {
         let _ = self
             .room_events
-            .send(RoomEvent::BroadcastRoomCreated(room.clone()));
+            .send(SteckerServerEvent::BroadcastRoomCreated(room.clone()));
         self.map.write().await.insert(room_name.to_string(), room);
     }
 
@@ -181,7 +186,7 @@ impl RoomMapTrait for RoomMap {
             if room.read().await.meta().admin_password == password {
                 let _ = self
                     .room_events
-                    .send(RoomEvent::BroadcastRoomUpdated(room.clone()));
+                    .send(SteckerServerEvent::BroadcastRoomUpdated(room.clone()));
                 room.write().await.replace_sender(offer, password).await
             } else {
                 return Err(anyhow::anyhow!("Password does not match"));
@@ -208,7 +213,7 @@ impl RoomMapTrait for RoomMap {
             .await;
 
         match dispatcher.dispatcher_type {
-            crate::models::DispatcherType::Random => {
+            DispatcherType::Random => {
                 if let Some(room) = matched_rooms.choose(&mut StdRng::from_entropy()) {
                     let room_lock = room.read().await;
                     return Ok((&*room_lock).into());
