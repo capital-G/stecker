@@ -7,3 +7,6 @@ members = [
     "src/server",
     "src/shared",
 ]
+
+[patch.crates-io]
+audiopus_sys = { git = "https://github.com/sevenc-nanashi/audiopus_sys", rev = "00e9d16" }
