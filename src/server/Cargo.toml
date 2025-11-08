@@ -2,6 +2,7 @@
 name = "stecker_server"
 edition = "2021"
 version = "0.1.0"
+include = ["templates/**", "static/**"]
 
 [dependencies]
 shared = { path = "../shared" }
