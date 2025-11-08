@@ -2,13 +2,13 @@
 
 {% block content %}
 
-{% if let Some(room) = self.room %}
-    <h2>{{ room.name }}</h2>
+{% if room_name %}
+    <h2>{{ room_name }}</h2>
 
     <p>
         <button
             class="button"
-            @click="$store.stecker.joinRoom('{{ room.name }}', 'AUDIO')"
+            @click="$store.stecker.joinRoom('{{ room_name }}', 'AUDIO')"
             x-bind:disabled="$store.stecker.connectedRoom"
         >
             Start playing

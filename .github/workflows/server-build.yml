@@ -1,0 +1,35 @@
+name: server build
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  server_matrix:
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            artifact-suffix: linux
+          - os: macos-latest
+            artifact-suffix: macos-arm64
+
+    runs-on: ${{ matrix.os }}
+    steps:
+    - uses: actions/checkout@v5
+
+    - name: Build server
+      env:
+        CARGO_TARGET_DIR: target/server
+      run: |
+        cargo build --release --bin server
+
+    - name: upload server artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: superstecker_server_${{  matrix.artifact-suffix }}
+        path: target/server

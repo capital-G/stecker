@@ -2,6 +2,7 @@
 name = "stecker_server"
 edition = "2021"
 version = "0.1.0"
+include = ["templates/**", "static/**"]
 
 [dependencies]
 shared = { path = "../shared" }
@@ -23,8 +24,7 @@ rand = {version = "0.8.0", features = ["std_rng"]}
 regex = "1.11.1"
 datetime = "0.5.2"
 futures = "0.3.31"
-askama = "0.12.1"
-askama_web = { version = "0.12.1", features = ["tracing-0.1", "axum-0.7"] }
+minijinja = { version = "2.12.0", features = ["loader"] }
 
 [[bin]]
 name = "server"

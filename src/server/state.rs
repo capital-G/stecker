@@ -1,6 +1,7 @@
 use futures::stream::{self, StreamExt};
-use std::{collections::HashMap, future::Future, sync::Arc};
+use std::{collections::HashMap, future::Future, path::PathBuf, sync::Arc};
 
+use minijinja;
 use rand::{rngs::StdRng, seq::SliceRandom, SeedableRng};
 use tokio::sync::Mutex;
 
@@ -11,10 +12,15 @@ pub struct AppState {
     pub chat_rooms: RoomMap,
     pub audio_rooms: RoomMap,
     pub room_dispatchers: Arc<Mutex<HashMap<String, RoomDispatcher>>>,
+    pub jinja: Arc<minijinja::Environment<'static>>,
 }
 
 impl AppState {
     pub fn new() -> Self {
+        let mut env = minijinja::Environment::new();
+        let template_dir = PathBuf::from("templates");
+        env.set_loader(minijinja::path_loader(template_dir));
+
         Self {
             float_rooms: RoomMap {
                 map: Arc::new(Mutex::new(HashMap::new())),
@@ -26,6 +32,7 @@ impl AppState {
                 map: Arc::new(Mutex::new(HashMap::new())),
             },
             room_dispatchers: Arc::new(Mutex::new(HashMap::new())),
+            jinja: Arc::new(env),
         }
     }
 
