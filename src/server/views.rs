@@ -1,60 +1,65 @@
-use core::fmt;
 use std::sync::Arc;
 
-use askama::Template;
-use askama_web::WebTemplate;
 use axum::{
     extract::{Path, State},
-    http::StatusCode,
-    response::{IntoResponse, Redirect},
+    response::{Html, IntoResponse, Redirect},
 };
-use tracing::error;
 
 use crate::state::{AppState, RoomMapTrait};
 
-#[derive(Template, WebTemplate)]
-#[template(path = "debug.html.jinja")]
-pub struct DebugTemplate {}
-
-#[derive(Clone, Debug)]
-struct RoomInfo {
-    name: String,
+pub enum Template {
+    Debug,
+    Stream,
+    DispatcherNotFound,
+    DispatcherNoRoomAvailable,
 }
 
-#[derive(Template, WebTemplate, Clone, Debug)]
-#[template(path = "stream.html.jinja")]
-pub struct StreamTemplate {
-    room: Option<RoomInfo>,
+impl Template {
+    fn as_str(&self) -> &'static str {
+        match self {
+            Template::Debug => "debug.html.jinja",
+            Template::Stream => "stream.html.jinja",
+            Template::DispatcherNotFound => "dispatcher_not_found.html.jinja",
+            Template::DispatcherNoRoomAvailable => "dispatcher_no_room_available.html.jinja",
+        }
+    }
+}
+
+pub async fn debug_view(State(state): State<Arc<AppState>>) -> Html<String> {
+    let template = state
+        .jinja
+        .get_template(Template::Debug.as_str())
+        .expect("Missing debug template");
+    let rendered = template
+        .render(minijinja::context! {})
+        .expect("failed to render debug template");
+
+    Html(rendered)
 }
 
 pub async fn stream_view(
     State(state): State<Arc<AppState>>,
     Path(room_name): Path<String>,
-) -> StreamTemplate {
+) -> Html<String> {
     let map_guard = state.audio_rooms.map.lock().await;
     let room_value = map_guard.get(&room_name);
 
-    if let Some(room) = room_value {
-        StreamTemplate {
-            room: Some(RoomInfo {
-                name: room.lock().await.meta().name.to_owned(),
-            }),
-        }
-    } else {
-        StreamTemplate { room: None }
-    }
-}
+    let room_name = room_value
+        .map(async |room| room.lock().await.meta().name.to_owned())
+        .expect("failed to access rooms")
+        .await;
 
-#[derive(Template, WebTemplate, Clone, Debug)]
-#[template(path = "dispatcher_not_found.html.jinja")]
-pub struct DispatcherNotFoundTemplate {
-    dispatcher_name: String,
-}
+    let template = state
+        .jinja
+        .get_template(Template::Stream.as_str())
+        .expect("Stream template not found!");
+    let rendered = template
+        .render(minijinja::context! {
+            room_name => room_name,
+        })
+        .expect("Rendering of stream view failed");
 
-#[derive(Template, WebTemplate, Clone, Debug)]
-#[template(path = "dispatcher_no_room_available.html.jinja")]
-pub struct DispatcherNoRoomAvailableTemplate {
-    dispatcher_name: String,
+    Html(rendered)
 }
 
 pub async fn dispatcher_view(
@@ -73,12 +78,26 @@ pub async fn dispatcher_view(
                         Ok(Redirect::to(format!("/s/{}", room.name).as_str()).into_response())
                     }
                     Err(_) => {
-                        Ok(DispatcherNoRoomAvailableTemplate { dispatcher_name }.into_response())
+                        let template = state
+                            .jinja
+                            .get_template(Template::DispatcherNoRoomAvailable.as_str())
+                            .expect("Could not find dispatcher no room available template");
+                        let rendered = template
+                            .render(minijinja::context! {})
+                            .expect("Failed to render dispatcher no room available template");
+                        Ok(Html(rendered).into_response())
                     }
                 }
             }
         }
     } else {
-        Ok(DispatcherNotFoundTemplate { dispatcher_name }.into_response())
+        let template = state
+            .jinja
+            .get_template(Template::DispatcherNotFound.as_str())
+            .expect("Could not find dispatcher not found template");
+        let rendered = template
+            .render(minijinja::context! {})
+            .expect("Failed to render dispatcher not found template");
+        Ok(Html(rendered).into_response())
     }
 }
