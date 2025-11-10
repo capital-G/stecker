@@ -11,7 +11,8 @@ pub enum RoomEvent {
     BroadcastRoomUpdated(Arc<RwLock<BroadcastRoom>>),
     BroadcastRoomDeleted(String),
 
-    RoomDispatcherCreated(),
+    RoomDispatcherCreated(String),
+    RoomDispatcherReset(),
 }
 
 impl RoomEvent {
@@ -38,8 +39,12 @@ impl RoomEvent {
                     args: vec![room_name],
                 })
             }
-            RoomEvent::RoomDispatcherCreated() => OscPacket::Message(OscMessage {
+            RoomEvent::RoomDispatcherCreated(name) => OscPacket::Message(OscMessage {
                 addr: "/dispatcher/created".to_string(),
+                args: vec![rosc::OscType::String(name)],
+            }),
+            RoomEvent::RoomDispatcherReset() => OscPacket::Message(OscMessage {
+                addr: "/dispatcher/reset".to_string(),
                 args: vec![],
             }),
         }

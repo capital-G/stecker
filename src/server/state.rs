@@ -47,7 +47,7 @@ impl AppState {
     }
 
     pub async fn reset_rooms(&self) {
-        let _ = self.room_events.send(RoomEvent::RoomDispatcherCreated());
+        let _ = self.room_events.send(RoomEvent::RoomDispatcherReset());
         self.chat_rooms.reset_state().await;
         self.float_rooms.reset_state().await;
         self.audio_rooms.reset_state().await;

@@ -1,6 +1,7 @@
 use std::{sync::Arc, time::Duration};
 
 use crate::{
+    event_service::RoomEvent,
     models::{
         AudioBroadcastRoom, BroadcastRoom, DataBroadcastRoom, Room, RoomCreationReply,
         RoomDispatcher, RoomDispatcherInput, RoomType,
@@ -221,6 +222,10 @@ impl Mutation {
             .await
             .insert(room_dispatcher.name.clone(), room_dispatcher.clone());
         info!("Created a new dispatcher");
+
+        let _ = state.room_events.send(RoomEvent::RoomDispatcherCreated(
+            room_dispatcher.name.clone(),
+        ));
 
         let dispatcher_map_lock = state.room_dispatchers.clone();
         let name2 = name.clone();
