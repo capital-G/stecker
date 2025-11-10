@@ -23,7 +23,7 @@ pub struct AppState {
 impl AppState {
     pub fn new() -> Self {
         let mut env = minijinja::Environment::new();
-        let template_dir = PathBuf::from("templates");
+        let template_dir = std::env::current_dir().unwrap().join("templates");
         env.set_loader(minijinja::path_loader(template_dir));
 
         let (room_event_rx, _) = tokio::sync::broadcast::channel(32);
