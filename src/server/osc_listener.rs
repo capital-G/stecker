@@ -14,7 +14,64 @@ use tokio_util::codec::{Decoder, Encoder, FramedRead, FramedWrite};
 use tower::Service;
 use tracing::{debug, error, instrument, Instrument};
 
+use crate::models::{DispatcherType, RoomDispatcherInput, RoomType};
 use crate::state::AppState;
+
+impl TryFrom<OscMessage> for RoomDispatcherInput {
+    type Error = ();
+
+    fn try_from(message: OscMessage) -> Result<RoomDispatcherInput, Self::Error> {
+        match message.args.len() {
+            4 => Ok(RoomDispatcherInput {
+                name: message.args[0].clone().string().ok_or(())?,
+                admin_password: message.args[1].clone().string(),
+                rule: message.args[2].clone().string().ok_or(())?,
+                room_type: RoomType::Audio,
+                dispatcher_type: DispatcherType::Random,
+                timeout: message.args[3].clone().int().ok_or(())?,
+            }),
+            _ => Err(()),
+        }
+    }
+}
+
+struct OscProcessor {
+    state: Arc<AppState>,
+}
+
+impl OscProcessor {
+    pub async fn process(&self, osc_packet: OscPacket) -> Option<OscPacket> {
+        match osc_packet {
+            OscPacket::Message(osc_message) => match osc_message.addr.as_str() {
+                "/createDispatcher" => match RoomDispatcherInput::try_from(osc_message) {
+                    Ok(dispatcher_input) => {
+                        match self.state.create_dispatcher(dispatcher_input).await {
+                            Ok(_) => Some(Self::send_reply("Created dispatcher")),
+                            Err(_) => Some(Self::send_error("Error at creating dispatcher")),
+                        }
+                    }
+                    Err(_) => Some(Self::send_error("Invalid create dispatcher message")),
+                },
+                _ => None,
+            },
+            OscPacket::Bundle(_) => None,
+        }
+    }
+
+    fn send_reply(message: &str) -> OscPacket {
+        OscPacket::Message(OscMessage {
+            addr: "/reply".to_string(),
+            args: vec![rosc::OscType::String(message.to_string())],
+        })
+    }
+
+    pub fn send_error(message: &str) -> OscPacket {
+        OscPacket::Message(OscMessage {
+            addr: "/error".to_string(),
+            args: vec![rosc::OscType::String(message.to_string())],
+        })
+    }
+}
 
 #[instrument(skip(socket, state))]
 pub async fn handle_osc_client(socket: TcpStream, addr: SocketAddr, state: Arc<AppState>) {
@@ -28,19 +85,25 @@ pub async fn handle_osc_client(socket: TcpStream, addr: SocketAddr, state: Arc<A
 
     let (connection_closed_sender, _) = broadcast::channel::<()>(1);
 
-    let reader_task =
-        {
-            let connection_closed = connection_closed_sender.clone();
-            let mut service = OscService { client_addr: addr };
+    let osc_processor = OscProcessor { state };
 
-            tokio::spawn(async move {
+    let reader_task = {
+        let connection_closed = connection_closed_sender.clone();
+        let mut service = OscService { client_addr: addr };
+
+        tokio::spawn(async move {
             while let Some(result) = framed_reader.next().await {
                 match result {
                     Ok(msg) => {
-                        if let Some(response) = service.call(msg).await.unwrap() {
-                            if tx_outgoing_osc.send(response).await.is_err() {
-                                debug!("Writing task seems to been dropped - stop reading task");
-                                break;
+                        if let Some(osc_packet) = service.call(msg).await.unwrap() {
+                            match osc_processor.process(osc_packet).await {
+                                Some(reply) => {
+                                    if tx_outgoing_osc.send(reply).await.is_err() {
+                                        debug!("Writing task seems to been dropped - stop reading task");
+                                        break;
+                                    }
+                                },
+                                None => {},
                             }
                         }
                     },
@@ -53,7 +116,7 @@ pub async fn handle_osc_client(socket: TcpStream, addr: SocketAddr, state: Arc<A
             let _ = connection_closed.send(());
             debug!("Reader task finished");
         }.in_current_span())
-        };
+    };
 
     let writer_task = {
         let mut connection_closed_receiver = connection_closed_sender.subscribe();

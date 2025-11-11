@@ -65,13 +65,13 @@ pub struct RoomDispatcherInput {
     pub rule: String,
     pub room_type: RoomType,
     pub dispatcher_type: DispatcherType,
-    pub timeout: u64,
+    pub timeout: i32,
 }
 
 impl From<RoomDispatcherInput> for RoomDispatcher {
     fn from(value: RoomDispatcherInput) -> Self {
         let (timeout_sender, timeout_receiver) =
-            tokio::sync::watch::channel(Duration::from_secs(value.timeout));
+            tokio::sync::watch::channel(Duration::from_secs(value.timeout.try_into().unwrap()));
         RoomDispatcher {
             name: value.name,
             admin_password: if let Some(pw) = value.admin_password {
