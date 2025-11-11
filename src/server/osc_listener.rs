@@ -96,7 +96,7 @@ pub async fn handle_osc_client(socket: TcpStream, addr: SocketAddr, state: Arc<A
                             break;
                         }
                     },
-                    _ = tokio::time::sleep(Duration::from_secs(1)) => {
+                    _ = tokio::time::sleep(Duration::from_secs(10)) => {
                         let message = OscPacket::Message(OscMessage { addr: "/ping".to_string(), args: vec![] });
                         if tx_outgoing_ping_osc.send(message).await.is_err() {
                             debug!("Writer task stopped, stop pinging");
