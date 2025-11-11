@@ -7,6 +7,7 @@ use rand::{
     SeedableRng,
 };
 use regex::Regex;
+use shared::connections::ConnectionEvent;
 use shared::{
     connections::SteckerWebRTCConnection,
     models::{DataRoomInternalType, SteckerAudioChannel, SteckerData},
@@ -16,6 +17,8 @@ use tracing::{error, info, instrument, trace, warn, Instrument, Span};
 use uuid::Uuid;
 use webrtc::track::track_local::track_local_static_rtp::TrackLocalStaticRTP;
 use webrtc::track::track_local::TrackLocalWriter;
+
+use crate::event_service::RoomEvent;
 
 // graphql objects
 
@@ -402,7 +405,7 @@ pub struct AudioBroadcastRoom {
 pub struct AudioBroadcastRoomWithOffer {
     pub audio_broadcast_room: AudioBroadcastRoom,
     pub offer: String,
-    pub disconnected: Sender<()>,
+    pub connection_events: Sender<ConnectionEvent>,
 }
 
 impl AudioBroadcastRoom {
@@ -425,7 +428,7 @@ impl AudioBroadcastRoom {
         let response_offer = connection.respond_to_offer(offer).in_current_span().await?;
 
         let audio_channel_tx = audio_channel.audio_channel_tx.clone();
-        let disconnected = connection.connection_closed.clone();
+        let connection_events = connection.connection_events.clone();
         let mut stop_consuming = audio_channel.reset_sender.subscribe();
         let seq_number_sender = audio_channel.sequence_number_sender.clone();
 
@@ -467,7 +470,7 @@ impl AudioBroadcastRoom {
 
         return Ok(AudioBroadcastRoomWithOffer {
             offer: response_offer,
-            disconnected,
+            connection_events,
             audio_broadcast_room: Self {
                 stecker_audio_channel: audio_channel,
                 meta: BroadcastRoomMeta {
@@ -499,6 +502,28 @@ impl AudioBroadcastRoom {
                 trace!("Found an audio track");
                 let _ = connection.add_existing_audio_track(audio_track).await;
                 let response_offer = connection.respond_to_offer(offer.to_owned()).await?;
+
+                let mut connection_events = connection.connection_events.subscribe();
+                let num_listeners = self.meta.num_listeners.clone();
+                tokio::spawn(async move {
+                    loop {
+                        match connection_events.recv().await {
+                            Ok(event) => match event {
+                                ConnectionEvent::Connected => {
+                                    let new_num_listeners = *num_listeners.borrow() + 1;
+                                    let _ = num_listeners.send(new_num_listeners);
+                                }
+                                ConnectionEvent::ConnectionClosed => {
+                                    let new_num_listeners = *num_listeners.borrow() - 1;
+                                    let _ = num_listeners.send(new_num_listeners);
+                                    break;
+                                }
+                            },
+                            Err(_) => break,
+                        }
+                    }
+                });
+
                 Ok(response_offer)
             }
             None => Err(anyhow::anyhow!(

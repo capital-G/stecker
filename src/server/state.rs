@@ -145,7 +145,7 @@ impl RoomMapTrait for RoomMap {
     async fn insert_room(&self, room_name: &str, room: Arc<RwLock<BroadcastRoom>>) {
         let _ = self
             .room_events
-            .send(RoomEvent::BroadcastRoomCreated(room.clone()));
+            .send(RoomEvent::BroadcastRoomCreated(room_name.to_string()));
         self.map.write().await.insert(room_name.to_string(), room);
     }
 
@@ -186,9 +186,9 @@ impl RoomMapTrait for RoomMap {
         if let Some(room) = self.map.read().await.get(room_name).cloned() {
             // let room_clone = room.clone();
             if room.read().await.meta().admin_password == password {
-                let _ = self
-                    .room_events
-                    .send(RoomEvent::BroadcastRoomUpdated(room.clone()));
+                let _ = self.room_events.send(RoomEvent::BroadcastRoomUpdated(
+                    room.read().await.meta().name.clone(),
+                ));
                 room.write().await.replace_sender(offer, password).await
             } else {
                 return Err(anyhow::anyhow!("Password does not match"));

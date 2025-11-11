@@ -86,6 +86,10 @@ impl Mutation {
                         .replace_sender(&name, &room_type, &user_provided_password, &offer)
                         .await?;
 
+                    let _ = state
+                        .room_events
+                        .send(RoomEvent::BroadcastRoomUpdated(name.clone()));
+
                     return Ok(RoomCreationReply {
                         offer,
                         password: user_provided_password,
@@ -102,6 +106,7 @@ impl Mutation {
         };
 
         let name2 = name.clone();
+        let name3 = name.clone();
         let room_password2 = room_password.clone();
         match room_type {
             RoomType::Float | RoomType::Chat => {
@@ -153,6 +158,8 @@ impl Mutation {
                         result.audio_broadcast_room,
                     )));
                     let name3 = name2.clone();
+                    let name4 = name2.clone();
+                    let room_events_sender = state.room_events.clone();
                     room_lock.insert(name2, room.clone());
 
                     let audio_room = state.audio_rooms.map.clone();
@@ -167,6 +174,7 @@ impl Mutation {
                                 }
                             }
                         }
+                        let _ = room_events_sender.send(RoomEvent::BroadcastRoomDeleted(name4.clone()));
                         let mut audio_room_mutex_lock = audio_room.write().await;
                         audio_room_mutex_lock.remove(&name3);
                         info!("Cleared room");
@@ -174,6 +182,10 @@ impl Mutation {
                     .in_current_span(),);
                 }
                 info!("Created an audio room");
+
+                let _ = state
+                    .room_events
+                    .send(RoomEvent::BroadcastRoomCreated(name3.clone()));
 
                 Ok(RoomCreationReply {
                     offer: result.offer,
@@ -257,8 +269,6 @@ impl Mutation {
     ) -> anyhow::Result<String> {
         let connection_uuid = Uuid::new_v4();
         tracing::Span::current().record("connection_uuid", connection_uuid.to_string());
-
-        info!("Join room");
 
         let state = ctx.data_unchecked::<Arc<AppState>>();
 
