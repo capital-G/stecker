@@ -1,13 +1,14 @@
 use futures::stream::{self, StreamExt};
-use std::{collections::HashMap, future::Future, path::PathBuf, sync::Arc};
+use std::{collections::HashMap, future::Future, path::PathBuf, sync::Arc, time::Duration};
+use tracing::{info, Instrument};
 
 use minijinja;
 use rand::{rngs::StdRng, seq::SliceRandom, SeedableRng};
-use tokio::sync::RwLock;
+use tokio::{sync::RwLock, time::sleep};
 
 use crate::{
     event_service::RoomEvent,
-    models::{BroadcastRoom, Room, RoomDispatcher, RoomType},
+    models::{BroadcastRoom, Room, RoomDispatcher, RoomDispatcherInput, RoomType},
 };
 
 pub struct AppState {
@@ -102,6 +103,68 @@ impl AppState {
                     .await
             }
         }
+    }
+
+    pub async fn create_dispatcher(
+        &self,
+        dispatcher_input: RoomDispatcherInput,
+    ) -> anyhow::Result<RoomDispatcher> {
+        let name = dispatcher_input.name.clone();
+        let admin_password = dispatcher_input.admin_password.clone();
+        let timeout_value = dispatcher_input.timeout;
+
+        let room_dispatcher: RoomDispatcher = dispatcher_input.into();
+
+        if let Some(existing_dispatcher) = self.room_dispatchers.write().await.get_mut(&name) {
+            if let Some(pw) = admin_password {
+                if pw == existing_dispatcher.admin_password {
+                    existing_dispatcher.rule = room_dispatcher.rule;
+                    let _ = existing_dispatcher
+                        .timeout_sender
+                        .send(Duration::from_secs(timeout_value.try_into()?));
+                    return Ok(existing_dispatcher.clone());
+                } else {
+                    return Err(anyhow::anyhow!(
+                        "Password of existing dispatcher does not match"
+                    ));
+                }
+            } else {
+                return Err(anyhow::anyhow!(
+                    "Dispatcher already exists and no password provided"
+                ));
+            }
+        };
+
+        let mut timeout_receiver = room_dispatcher.timeout_receiver.clone();
+
+        self.room_dispatchers
+            .write()
+            .await
+            .insert(room_dispatcher.name.clone(), room_dispatcher.clone());
+        info!("Created a new dispatcher");
+
+        let _ = self.room_events.send(RoomEvent::RoomDispatcherCreated(
+            room_dispatcher.name.clone(),
+        ));
+
+        let dispatcher_map_lock = self.room_dispatchers.clone();
+        let name2 = name.clone();
+        tokio::spawn(
+            async move {
+                loop {
+                    let duration = *timeout_receiver.borrow();
+                    tokio::select! {
+                        _ = timeout_receiver.changed() => {}
+                        _ = sleep(duration) => {break}
+                    }
+                }
+                info!("Dispatcher timed out - will be deleted now");
+                dispatcher_map_lock.write().await.remove(&name2);
+            }
+            .in_current_span(),
+        );
+
+        Ok(room_dispatcher)
     }
 }
 

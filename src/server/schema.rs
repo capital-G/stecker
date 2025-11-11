@@ -211,62 +211,9 @@ impl Mutation {
         ctx: &Context<'a>,
         dispatcher: RoomDispatcherInput,
     ) -> anyhow::Result<RoomDispatcher> {
-        let name = dispatcher.name.clone();
-        let admin_password = dispatcher.admin_password.clone();
-        let timeout_value = dispatcher.timeout;
-
-        let room_dispatcher: RoomDispatcher = dispatcher.into();
         let state = ctx.data_unchecked::<Arc<AppState>>();
 
-        if let Some(existing_dispatcher) = state.room_dispatchers.write().await.get_mut(&name) {
-            if let Some(pw) = admin_password {
-                if pw == existing_dispatcher.admin_password {
-                    existing_dispatcher.rule = room_dispatcher.rule;
-                    let _ = existing_dispatcher
-                        .timeout_sender
-                        .send(Duration::from_secs(timeout_value));
-                    return Ok(existing_dispatcher.clone());
-                } else {
-                    return Err(anyhow!("Password of existing dispatcher does not match"));
-                }
-            } else {
-                return Err(anyhow!(
-                    "Dispatcher already exists and no password provided"
-                ));
-            }
-        };
-
-        let mut timeout_receiver = room_dispatcher.timeout_receiver.clone();
-
-        state
-            .room_dispatchers
-            .write()
-            .await
-            .insert(room_dispatcher.name.clone(), room_dispatcher.clone());
-        info!("Created a new dispatcher");
-
-        let _ = state.room_events.send(RoomEvent::RoomDispatcherCreated(
-            room_dispatcher.name.clone(),
-        ));
-
-        let dispatcher_map_lock = state.room_dispatchers.clone();
-        let name2 = name.clone();
-        tokio::spawn(
-            async move {
-                loop {
-                    let duration = *timeout_receiver.borrow();
-                    tokio::select! {
-                        _ = timeout_receiver.changed() => {}
-                        _ = sleep(duration) => {break}
-                    }
-                }
-                info!("Dispatcher timed out - will be deleted now");
-                dispatcher_map_lock.write().await.remove(&name2);
-            }
-            .in_current_span(),
-        );
-
-        Ok(room_dispatcher)
+        state.create_dispatcher(dispatcher).await
     }
 
     #[instrument(skip(self, ctx, offer), fields(connection_uuid), parent = None, err)]
