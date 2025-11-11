@@ -18,6 +18,107 @@ Stecker {
 	}
 }
 
+SteckerOSC {
+	classvar <>host;
+	classvar <>port;
+
+	classvar <>onRoomCreated;
+	classvar <>onRoomUpdated;
+	classvar <>onRoomDeleted;
+	classvar <>onRoomMessage;
+
+	classvar <>onDispatcherCreated;
+	classvar <>onDispatcherDeleted;
+
+	classvar <lastPing;
+
+	classvar <netAddr;
+	// we can not add methods to addOSCRecvFunc, so we need to
+	// store a variable which holds a function
+	classvar recvFunc;
+
+	classvar newsCallbacks;
+
+	*initClass {
+		host = "osc.stecker.dennis-scheiba.com";
+		port = 1337;
+		newsCallbacks = ();
+
+		recvFunc = {|msg, time, replyAddr, recvPort|
+			if(replyAddr == netAddr, {
+				switch(msg[0])
+				{"/ping".asSymbol} {lastPing = time;}
+				{"/error".asSymbol} {msg[1].asString.warn;}
+				{"/reply".asSymbol} {"Stecker: %".format(msg[1]).postln;}
+
+				{"/createdRoom".asSymbol} {onRoomCreated.value(*msg[1..])}
+				{"/updatedRoom".asSymbol} {onRoomUpdated.value(*msg[1..])}
+				{"/deletedRoom".asSymbol} {onRoomDeleted.value(*msg[1..])}
+				{"/room".asSymbol} {
+					// roomName event eventArgs
+					if(newsCallbacks[msg[1]].notNil, {
+						newsCallbacks[msg[1]].value(*msg[2..]);
+					});
+					onRoomMessage.value(*msg[1..]);
+				}
+
+				{"/createdDispatcher".asSymbol} {onDispatcherCreated.value(*msg[1..])}
+				{"/deletedDispatcher".asSymbol} {onDispatcherDeleted.value(*msg[1..])}
+			});
+		}
+	}
+
+	*connect {
+		if(SteckerOSC.connected.not, {
+			netAddr = NetAddr(host, port);
+			netAddr.tryConnectTCP(
+				onComplete: {
+					"Connected".postln;
+					thisProcess.addOSCRecvFunc(recvFunc);
+				},
+				onFailure: {
+					"Failed to connect to Stecker OSC host".warn;
+				},
+			);
+		}, {
+			"Already connected".warn;
+		});
+	}
+
+	*disconnect {
+		if(SteckerOSC.connected, {
+			thisProcess.removeOSCRecvFunc(recvFunc);
+			netAddr.disconnect;
+		});
+	}
+
+	*connected {
+		^if(netAddr.notNil, {
+			netAddr.isConnected;
+		}, {
+			false;
+		});
+	}
+
+	*createDispatcher {|name, password, rule, timeout=1000|
+		if(SteckerOSC.connected.not, {
+			"SteckerOSC is not connected".warn;
+			^this;
+		});
+		netAddr.sendMsg(
+			"/createDispatcher",
+			name,
+			password,
+			rule,
+			timeout.asInteger,
+		);
+	}
+
+	*onRoomNews {|roomName, callback|
+		newsCallbacks[roomName.asSymbol] = callback;
+	}
+}
+
 DataSteckerIn : UGen {
 	*kr {|roomName, host=nil|
 		host = host ? Stecker.host;
