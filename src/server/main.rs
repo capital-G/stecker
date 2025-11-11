@@ -41,8 +41,11 @@ struct Cli {
     #[arg(long, default_value_t = 8000)]
     port: u16,
 
+    #[arg(long, default_value_t=LOCAL_HOST.to_string())]
+    osc_host: String,
+
     /// tcp osc port to listen on
-    #[arg(long, default_value_t = 8001)]
+    #[arg(long, default_value_t = 1337)]
     osc_port: u16,
 }
 
@@ -72,8 +75,6 @@ async fn main() {
         .extension(Tracing)
         .finish();
 
-    let host2 = args.host.clone();
-
     let http_app = Router::new()
         .route("/graphql", get(graphiql).post_service(GraphQL::new(schema)))
         .nest_service("/static", ServeDir::new("static"))
@@ -92,8 +93,11 @@ async fn main() {
     });
 
     let osc_app = tokio::spawn(async move {
-        info!("Start TCP-OSC serving on {}:{}", host2, args.osc_port);
-        let tcp_osc_listener = tokio::net::TcpListener::bind((host2, args.osc_port))
+        info!(
+            "Start TCP-OSC serving on {}:{}",
+            args.osc_host, args.osc_port
+        );
+        let tcp_osc_listener = tokio::net::TcpListener::bind((args.osc_host, args.osc_port))
             .await
             .unwrap();
         loop {
