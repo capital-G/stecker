@@ -25,11 +25,17 @@ use webrtc::track::track_local::track_local_static_rtp::TrackLocalStaticRTP;
 use webrtc::track::track_local::track_local_static_sample::TrackLocalStaticSample;
 use webrtc::track::track_remote::TrackRemote;
 
+#[derive(Clone, Debug)]
+pub enum ConnectionEvent {
+    Connected,
+    ConnectionClosed,
+}
+
 /// This handles all the setup of a WebRTC peer connection.
 pub struct SteckerWebRTCConnection {
     peer_connection: RTCPeerConnection,
     data_channel_map: Arc<Mutex<DataChannelMap>>,
-    pub connection_closed: Sender<()>,
+    pub connection_events: Sender<ConnectionEvent>,
 }
 
 impl SteckerWebRTCConnection {
@@ -56,19 +62,24 @@ impl SteckerWebRTCConnection {
 
         let peer_connection = api.new_peer_connection(config).await?;
 
-        let (connection_closed, _) = broadcast::channel::<()>(1);
-        let connection_closed2 = connection_closed.clone();
+        let (connection_events_sender, _) = broadcast::channel::<ConnectionEvent>(1);
+        let connection_events_sender2 = connection_events_sender.clone();
 
         let span = Span::current();
         peer_connection.on_ice_connection_state_change(Box::new(move |state| {
-            let connection_closed3 = connection_closed.clone();
+            let connection_events_sender3 = connection_events_sender.clone();
             let span2 = span.clone();
             Box::pin(
                 async move {
                     match state {
                         RTCIceConnectionState::Disconnected => {
                             info!("Connection closed");
-                            let _ = connection_closed3.send(());
+                            let _ =
+                                connection_events_sender3.send(ConnectionEvent::ConnectionClosed);
+                        }
+                        RTCIceConnectionState::Connected => {
+                            info!("Connected");
+                            let _ = connection_events_sender3.send(ConnectionEvent::Connected);
                         }
                         state => {
                             trace!(?state, "New connection state");
@@ -81,7 +92,7 @@ impl SteckerWebRTCConnection {
 
         Ok(Self {
             peer_connection,
-            connection_closed: connection_closed2,
+            connection_events: connection_events_sender2,
             data_channel_map: Arc::new(Mutex::new(DataChannelMap(Mutex::new(HashMap::new())))),
         })
     }

@@ -149,12 +149,13 @@ pub struct BroadcastRoomMeta {
     pub meta_reply: Sender<SteckerData>,
     pub meta_broadcast: Sender<SteckerData>,
 
-    pub num_listeners: tokio::sync::watch::Sender<i64>,
+    pub num_listeners: tokio::sync::watch::Sender<i32>,
     // we need to keep the channel open, so we attach
     // a receiver to the "lifetime" of this struct.
     // as receivers can be created from the sender,
     // this receiver does not need to be public accessible
-    _num_listeners_receiver: tokio::sync::watch::Receiver<i64>,
+    _num_listeners_receiver: tokio::sync::watch::Receiver<i32>,
+    pub room_events: Sender<RoomEvent>,
 }
 
 impl From<RoomType> for DataRoomInternalType {
@@ -172,7 +173,7 @@ impl From<RoomType> for DataRoomInternalType {
 pub struct Room {
     pub uuid: String,
     pub name: String,
-    pub num_listeners: i64,
+    pub num_listeners: i32,
     pub room_type: RoomType,
 }
 
@@ -203,6 +204,7 @@ impl DataBroadcastRoom {
         offer: String,
         room_type: DataRoomInternalType,
         password: String,
+        room_events: Sender<RoomEvent>,
     ) -> anyhow::Result<BroadcastRoomWithOffer> {
         info!("Something else");
         let connection = SteckerWebRTCConnection::build_connection()
@@ -274,6 +276,7 @@ impl DataBroadcastRoom {
                 num_listeners: num_listeners_sender,
                 _num_listeners_receiver: num_listeners_receiver,
                 admin_password: password,
+                room_events,
             },
             room_type: room_type,
             reply: stecker_data_channel.outbound.clone(),
@@ -413,6 +416,7 @@ impl AudioBroadcastRoom {
         name: String,
         offer: String,
         admin_password: String,
+        room_events: Sender<RoomEvent>,
     ) -> anyhow::Result<AudioBroadcastRoomWithOffer> {
         let connection = SteckerWebRTCConnection::build_connection()
             .in_current_span()
@@ -434,8 +438,10 @@ impl AudioBroadcastRoom {
 
         // a thread which consumes the audio data we receive and pushes it to our internal
         // webrtc channel which is then read/consumed and pushed to all our subscribers
-        tokio::spawn(
-            async move {
+        let mut num_listeners_receiver2 = num_listeners_receiver.clone();
+        let room_events2 = room_events.clone();
+        let room_name2 = name.clone();
+        tokio::spawn(async move {
                 let track = audio_track_receiver.recv().await.unwrap();
                 let local_track = Arc::new(TrackLocalStaticRTP::new(
                     track.codec().capability,
@@ -456,6 +462,11 @@ impl AudioBroadcastRoom {
                             } else {
                                 error!("Failed to read track - stop consuming");
                                 break;
+                            }
+                       },
+                       num = num_listeners_receiver2.changed() => {
+                            if let Ok(_) = num {
+                                let _ = room_events2.send(RoomEvent::BroadcastRoomUserCount(room_name2.clone(), *num_listeners_receiver2.borrow()));
                             }
                        },
                        _ = stop_consuming.recv() => {
@@ -481,6 +492,7 @@ impl AudioBroadcastRoom {
                     num_listeners: num_listeners_sender,
                     _num_listeners_receiver: num_listeners_receiver,
                     admin_password,
+                    room_events,
                 },
             },
         });

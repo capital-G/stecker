@@ -110,10 +110,15 @@ impl Mutation {
         let room_password2 = room_password.clone();
         match room_type {
             RoomType::Float | RoomType::Chat => {
-                let result =
-                    DataBroadcastRoom::create_room(name, offer, room_type.into(), room_password)
-                        .instrument(Span::current())
-                        .await?;
+                let result = DataBroadcastRoom::create_room(
+                    name,
+                    offer,
+                    room_type.into(),
+                    room_password,
+                    state.room_events.clone(),
+                )
+                .instrument(Span::current())
+                .await?;
                 {
                     let mut room_lock = match room_type {
                         RoomType::Float => {
@@ -137,9 +142,14 @@ impl Mutation {
                 })
             }
             RoomType::Audio => {
-                let result = AudioBroadcastRoom::create_room(name, offer, room_password)
-                    .in_current_span()
-                    .await?;
+                let result = AudioBroadcastRoom::create_room(
+                    name,
+                    offer,
+                    room_password,
+                    state.room_events.clone(),
+                )
+                .in_current_span()
+                .await?;
                 {
                     let mut room_lock = match room_type {
                         RoomType::Audio => state.audio_rooms.map.write().await,

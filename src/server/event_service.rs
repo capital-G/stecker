@@ -4,8 +4,7 @@ use rosc::{OscMessage, OscPacket};
 pub enum RoomEvent {
     BroadcastRoomCreated(String),
     BroadcastRoomUpdated(String),
-    BroadcastRoomUserJoined(String, i32),
-    BroadcastRoomUserLeft(String, i32),
+    BroadcastRoomUserCount(String, i32),
     BroadcastRoomDeleted(String),
 
     RoomDispatcherCreated(String),
@@ -45,25 +44,13 @@ impl RoomEvent {
                     args: vec![deleted, room],
                 })
             }
-            RoomEvent::BroadcastRoomUserJoined(room_name, new_num_listeners) => {
-                let room_joined = rosc::OscType::String("joined".to_string());
+            RoomEvent::BroadcastRoomUserCount(room_name, new_num_listeners) => {
+                let room_joined = rosc::OscType::String("users".to_string());
                 OscPacket::Message(OscMessage {
                     addr: "/room".to_string(),
                     args: vec![
                         rosc::OscType::String(room_name),
                         room_joined,
-                        rosc::OscType::Int(new_num_listeners),
-                    ],
-                })
-            }
-            RoomEvent::BroadcastRoomUserLeft(room_name, new_num_listeners) => {
-                let room_left = rosc::OscType::String("left".to_string());
-
-                OscPacket::Message(OscMessage {
-                    addr: "/room".to_string(),
-                    args: vec![
-                        rosc::OscType::String(room_name),
-                        room_left,
                         rosc::OscType::Int(new_num_listeners),
                     ],
                 })
