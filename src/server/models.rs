@@ -7,6 +7,7 @@ use rand::{
     SeedableRng,
 };
 use regex::Regex;
+use shared::connections::ConnectionEvent;
 use shared::{
     connections::SteckerWebRTCConnection,
     models::{DataRoomInternalType, SteckerAudioChannel, SteckerData},
@@ -16,6 +17,8 @@ use tracing::{error, info, instrument, trace, warn, Instrument, Span};
 use uuid::Uuid;
 use webrtc::track::track_local::track_local_static_rtp::TrackLocalStaticRTP;
 use webrtc::track::track_local::TrackLocalWriter;
+
+use crate::event_service::RoomEvent;
 
 // graphql objects
 
@@ -62,13 +65,13 @@ pub struct RoomDispatcherInput {
     pub rule: String,
     pub room_type: RoomType,
     pub dispatcher_type: DispatcherType,
-    pub timeout: u64,
+    pub timeout: i32,
 }
 
 impl From<RoomDispatcherInput> for RoomDispatcher {
     fn from(value: RoomDispatcherInput) -> Self {
         let (timeout_sender, timeout_receiver) =
-            tokio::sync::watch::channel(Duration::from_secs(value.timeout));
+            tokio::sync::watch::channel(Duration::from_secs(value.timeout.try_into().unwrap()));
         RoomDispatcher {
             name: value.name,
             admin_password: if let Some(pw) = value.admin_password {
@@ -103,6 +106,7 @@ impl Display for RoomType {
     }
 }
 
+#[derive(Debug)]
 pub enum BroadcastRoom {
     Data(DataBroadcastRoom),
     Audio(AudioBroadcastRoom),
@@ -136,6 +140,7 @@ impl BroadcastRoom {
     }
 }
 
+#[derive(Debug)]
 pub struct BroadcastRoomMeta {
     pub name: String,
     pub uuid: Uuid,
@@ -144,12 +149,13 @@ pub struct BroadcastRoomMeta {
     pub meta_reply: Sender<SteckerData>,
     pub meta_broadcast: Sender<SteckerData>,
 
-    pub num_listeners: tokio::sync::watch::Sender<i64>,
+    pub num_listeners: tokio::sync::watch::Sender<i32>,
     // we need to keep the channel open, so we attach
     // a receiver to the "lifetime" of this struct.
     // as receivers can be created from the sender,
     // this receiver does not need to be public accessible
-    _num_listeners_receiver: tokio::sync::watch::Receiver<i64>,
+    _num_listeners_receiver: tokio::sync::watch::Receiver<i32>,
+    pub room_events: Sender<RoomEvent>,
 }
 
 impl From<RoomType> for DataRoomInternalType {
@@ -167,12 +173,12 @@ impl From<RoomType> for DataRoomInternalType {
 pub struct Room {
     pub uuid: String,
     pub name: String,
-    pub num_listeners: i64,
+    pub num_listeners: i32,
     pub room_type: RoomType,
 }
 
 // server state objects
-// #[derive(Clone)]
+#[derive(Debug)]
 pub struct DataBroadcastRoom {
     pub meta: BroadcastRoomMeta,
     /// Reply to server (messages not broadcasted)
@@ -198,6 +204,7 @@ impl DataBroadcastRoom {
         offer: String,
         room_type: DataRoomInternalType,
         password: String,
+        room_events: Sender<RoomEvent>,
     ) -> anyhow::Result<BroadcastRoomWithOffer> {
         info!("Something else");
         let connection = SteckerWebRTCConnection::build_connection()
@@ -269,6 +276,7 @@ impl DataBroadcastRoom {
                 num_listeners: num_listeners_sender,
                 _num_listeners_receiver: num_listeners_receiver,
                 admin_password: password,
+                room_events,
             },
             room_type: room_type,
             reply: stecker_data_channel.outbound.clone(),
@@ -391,6 +399,7 @@ impl From<&BroadcastRoom> for Room {
     }
 }
 
+#[derive(Debug)]
 pub struct AudioBroadcastRoom {
     pub meta: BroadcastRoomMeta,
     pub stecker_audio_channel: SteckerAudioChannel,
@@ -399,7 +408,7 @@ pub struct AudioBroadcastRoom {
 pub struct AudioBroadcastRoomWithOffer {
     pub audio_broadcast_room: AudioBroadcastRoom,
     pub offer: String,
-    pub disconnected: Sender<()>,
+    pub connection_events: Sender<ConnectionEvent>,
 }
 
 impl AudioBroadcastRoom {
@@ -407,6 +416,7 @@ impl AudioBroadcastRoom {
         name: String,
         offer: String,
         admin_password: String,
+        room_events: Sender<RoomEvent>,
     ) -> anyhow::Result<AudioBroadcastRoomWithOffer> {
         let connection = SteckerWebRTCConnection::build_connection()
             .in_current_span()
@@ -422,14 +432,16 @@ impl AudioBroadcastRoom {
         let response_offer = connection.respond_to_offer(offer).in_current_span().await?;
 
         let audio_channel_tx = audio_channel.audio_channel_tx.clone();
-        let disconnected = connection.connection_closed.clone();
+        let connection_events = connection.connection_events.clone();
         let mut stop_consuming = audio_channel.reset_sender.subscribe();
         let seq_number_sender = audio_channel.sequence_number_sender.clone();
 
         // a thread which consumes the audio data we receive and pushes it to our internal
         // webrtc channel which is then read/consumed and pushed to all our subscribers
-        tokio::spawn(
-            async move {
+        let mut num_listeners_receiver2 = num_listeners_receiver.clone();
+        let room_events2 = room_events.clone();
+        let room_name2 = name.clone();
+        tokio::spawn(async move {
                 let track = audio_track_receiver.recv().await.unwrap();
                 let local_track = Arc::new(TrackLocalStaticRTP::new(
                     track.codec().capability,
@@ -452,6 +464,11 @@ impl AudioBroadcastRoom {
                                 break;
                             }
                        },
+                       num = num_listeners_receiver2.changed() => {
+                            if let Ok(_) = num {
+                                let _ = room_events2.send(RoomEvent::BroadcastRoomUserCount(room_name2.clone(), *num_listeners_receiver2.borrow()));
+                            }
+                       },
                        _ = stop_consuming.recv() => {
                             info!("Got signal to terminate consuming the current track");
                             break;
@@ -464,7 +481,7 @@ impl AudioBroadcastRoom {
 
         return Ok(AudioBroadcastRoomWithOffer {
             offer: response_offer,
-            disconnected,
+            connection_events,
             audio_broadcast_room: Self {
                 stecker_audio_channel: audio_channel,
                 meta: BroadcastRoomMeta {
@@ -475,6 +492,7 @@ impl AudioBroadcastRoom {
                     num_listeners: num_listeners_sender,
                     _num_listeners_receiver: num_listeners_receiver,
                     admin_password,
+                    room_events,
                 },
             },
         });
@@ -496,6 +514,28 @@ impl AudioBroadcastRoom {
                 trace!("Found an audio track");
                 let _ = connection.add_existing_audio_track(audio_track).await;
                 let response_offer = connection.respond_to_offer(offer.to_owned()).await?;
+
+                let mut connection_events = connection.connection_events.subscribe();
+                let num_listeners = self.meta.num_listeners.clone();
+                tokio::spawn(async move {
+                    loop {
+                        match connection_events.recv().await {
+                            Ok(event) => match event {
+                                ConnectionEvent::Connected => {
+                                    let new_num_listeners = *num_listeners.borrow() + 1;
+                                    let _ = num_listeners.send(new_num_listeners);
+                                }
+                                ConnectionEvent::ConnectionClosed => {
+                                    let new_num_listeners = *num_listeners.borrow() - 1;
+                                    let _ = num_listeners.send(new_num_listeners);
+                                    break;
+                                }
+                            },
+                            Err(_) => break,
+                        }
+                    }
+                });
+
                 Ok(response_offer)
             }
             None => Err(anyhow::anyhow!(
