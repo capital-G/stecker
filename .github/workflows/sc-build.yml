@@ -29,6 +29,11 @@ jobs:
         ref: "main"
         path: "supercollider"
 
+    - name: Setup dependencies
+      if: matrix.os == 'macos-latest'
+      run: |
+        brew install ninja
+
     - name: Build Plugin
       run: |
         cd src/sc_plugin
