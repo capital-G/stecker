@@ -37,6 +37,7 @@ pub struct RoomDispatcher {
     pub dispatcher_type: DispatcherType,
     pub timeout_sender: tokio::sync::watch::Sender<Duration>,
     pub timeout_receiver: tokio::sync::watch::Receiver<Duration>,
+    pub return_room_prefix: Option<String>,
 }
 
 // graphql conversion
@@ -67,6 +68,7 @@ pub struct RoomDispatcherInput {
     pub room_type: RoomType,
     pub dispatcher_type: DispatcherType,
     pub timeout: i32,
+    pub return_room_prefix: Option<String>,
 }
 
 impl From<RoomDispatcherInput> for RoomDispatcher {
@@ -85,6 +87,7 @@ impl From<RoomDispatcherInput> for RoomDispatcher {
             dispatcher_type: value.dispatcher_type,
             timeout_sender,
             timeout_receiver,
+            return_room_prefix: value.return_room_prefix,
         }
     }
 }

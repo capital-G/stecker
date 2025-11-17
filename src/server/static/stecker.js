@@ -310,10 +310,18 @@ Alpine.store("stecker", {
      *
      * @param {string} name
      * @param {string} roomType
+     * @param {string|null} returnRoomPrefix
      */
-    async joinRoom(name, roomType) {
+    async joinRoom(name, roomType, returnRoomPrefix) {
         // @todo derived from graphQL, but in js we use lowercase
         roomType = roomType.toLowerCase();
+
+        if(returnRoomPrefix != null) {
+            const returnRoomName = `${returnRoomPrefix}${name}`;
+            console.log(`Create return room ${returnRoomName}`);
+            this.createRoom(returnRoomName, roomType);
+        }
+
         let steckerConnection = new SteckerConnection();
 
         new SteckerDataChannel(steckerConnection, "meta", (msg) => {

@@ -5,13 +5,13 @@
 {% if room_name %}
     <h2>{{ room_name }}</h2>
 
-    <p>
+    <p x-data="{returnRoomPrefix: new URLSearchParams(document.location.search).get('returnRoomPrefix')}">
         <button
             class="button"
-            @click="$store.stecker.joinRoom('{{ room_name }}', 'AUDIO')"
+            @click="$store.stecker.joinRoom('{{ room_name }}', 'AUDIO',  returnRoomPrefix)"
             x-bind:disabled="$store.stecker.connectedRoom"
+            x-text="returnRoomPrefix == null ? 'Start playing' : 'Start playing and broadcasting'"
         >
-            Start playing
         </button>
     </p>
 

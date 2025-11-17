@@ -12,7 +12,7 @@ use tokio::{
 };
 use tokio_util::codec::{Decoder, Encoder, FramedRead, FramedWrite};
 use tower::Service;
-use tracing::{debug, error, instrument, Instrument};
+use tracing::{debug, error, instrument, trace, Instrument};
 
 use crate::models::{DispatcherType, RoomDispatcherInput, RoomType};
 use crate::state::AppState;
@@ -20,17 +20,22 @@ use crate::state::AppState;
 impl TryFrom<OscMessage> for RoomDispatcherInput {
     type Error = ();
 
+    #[instrument(skip_all)]
     fn try_from(message: OscMessage) -> Result<RoomDispatcherInput, Self::Error> {
         match message.args.len() {
-            4 => Ok(RoomDispatcherInput {
+            5 => Ok(RoomDispatcherInput {
                 name: message.args[0].clone().string().ok_or(())?,
                 admin_password: message.args[1].clone().string(),
                 rule: message.args[2].clone().string().ok_or(())?,
                 room_type: RoomType::Audio,
                 dispatcher_type: DispatcherType::Random,
                 timeout: message.args[3].clone().int().ok_or(())?,
+                return_room_prefix: message.args[4].clone().string(),
             }),
-            _ => Err(()),
+            _ => {
+                trace!("Invaild length of room dispatch OSC message");
+                Err(())
+            }
         }
     }
 }
@@ -40,6 +45,7 @@ struct OscProcessor {
 }
 
 impl OscProcessor {
+    #[instrument(skip_all)]
     pub async fn process(&self, osc_packet: OscPacket) -> Option<OscPacket> {
         match osc_packet {
             OscPacket::Message(osc_message) => match osc_message.addr.as_str() {
@@ -96,6 +102,7 @@ pub async fn handle_osc_client(socket: TcpStream, addr: SocketAddr, state: Arc<A
                 match result {
                     Ok(msg) => {
                         if let Some(osc_packet) = service.call(msg).await.unwrap() {
+                            trace!("Received OSC packet");
                             match osc_processor.process(osc_packet).await {
                                 Some(reply) => {
                                     if tx_outgoing_osc.send(reply).await.is_err() {
