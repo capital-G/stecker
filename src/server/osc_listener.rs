@@ -90,7 +90,7 @@ pub async fn handle_osc_client(socket: TcpStream, addr: SocketAddr, state: Arc<A
 
     let (tx_outgoing_osc, mut rx_outgoing_osc) = mpsc::channel::<OscPacket>(16);
     let tx_outgoing_ping_osc = tx_outgoing_osc.clone();
-    let mut room_events_rx = state.room_events.clone().subscribe();
+    let mut room_events_rx = state.room_events.subscribe();
 
     let (connection_closed_sender, _) = broadcast::channel::<()>(1);
 
@@ -159,7 +159,6 @@ pub async fn handle_osc_client(socket: TcpStream, addr: SocketAddr, state: Arc<A
         tokio::spawn(async move {
             loop {
                 tokio::select! {
-
                     _ = connection_closed_receiver.recv() => {
                         debug!("Connection closed signal received in ping task");
                         break;

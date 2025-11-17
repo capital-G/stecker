@@ -148,6 +148,7 @@ impl AppState {
 
         let dispatcher_map_lock = self.room_dispatchers.clone();
         let name2 = name.clone();
+        let dispatcher_deleted_event = self.room_events.clone();
         tokio::spawn(
             async move {
                 loop {
@@ -158,6 +159,8 @@ impl AppState {
                     }
                 }
                 info!("Dispatcher timed out - will be deleted now");
+                let _ =
+                    dispatcher_deleted_event.send(RoomEvent::BroadcastRoomDeleted(name2.clone()));
                 dispatcher_map_lock.write().await.remove(&name2);
             }
             .in_current_span(),

@@ -25,11 +25,6 @@ impl RoomEvent {
                 OscPacket::Message(OscMessage {
                     addr: "/updatedRoom".to_string(),
                     args: vec![room.clone()],
-                });
-                OscPacket::Message(OscMessage {
-                    addr: "/room/{room_name}".to_string(),
-
-                    args: vec![updated, room],
                 })
             }
             RoomEvent::BroadcastRoomDeleted(room_name) => {
@@ -38,10 +33,6 @@ impl RoomEvent {
                 OscPacket::Message(OscMessage {
                     addr: "/deletedRoom".to_string(),
                     args: vec![room.clone()],
-                });
-                OscPacket::Message(OscMessage {
-                    addr: "/room".to_string(),
-                    args: vec![deleted, room],
                 })
             }
             RoomEvent::BroadcastRoomUserCount(room_name, new_num_listeners) => {
