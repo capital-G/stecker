@@ -4,6 +4,7 @@
 
 <div x-data="{
         returnRoomPrefix: new URLSearchParams(location.search).get('returnRoomPrefix'),
+        addRandomPostfix: parseInt(new URLSearchParams(location.search).get('addRandomPostfix')) >= 1,
         volume: 80,
         borderColor() {return $store.stecker.isPlaying ? 'greenyellow' : 'orange'},
         clickedPlay: false,
@@ -33,7 +34,7 @@
         align-items: center;
     ">
         <button
-            @click="$store.stecker.joinRoom('{{ room_name }}', 'AUDIO', returnRoomPrefix); clickedPlay=true;"
+            @click="$store.stecker.joinRoom('{{ room_name }}', 'AUDIO', returnRoomPrefix, addRandomPostfix); clickedPlay=true;"
             :style="{border: '4px solid ' + borderColor()}"
             :disabled="clickedPlay"
             style="

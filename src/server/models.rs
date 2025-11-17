@@ -98,6 +98,7 @@ pub struct RoomDispatcher {
     pub timeout_sender: tokio::sync::watch::Sender<Duration>,
     pub timeout_receiver: tokio::sync::watch::Receiver<Duration>,
     pub return_room_prefix: Option<String>,
+    pub add_random_postfix: bool,
 }
 
 // graphql conversion
@@ -118,6 +119,14 @@ impl RoomDispatcher {
     async fn dispatcher_type(&self) -> DispatcherType {
         self.dispatcher_type
     }
+
+    async fn return_room_prefix(&self) -> Option<String> {
+        self.return_room_prefix.clone()
+    }
+
+    async fn append_random_postfix(&self) -> bool {
+        self.add_random_postfix
+    }
 }
 
 #[derive(InputObject, Clone)]
@@ -129,6 +138,7 @@ pub struct RoomDispatcherInput {
     pub dispatcher_type: DispatcherType,
     pub timeout: i32,
     pub return_room_prefix: Option<String>,
+    pub add_random_postfix: bool,
 }
 
 impl From<RoomDispatcherInput> for RoomDispatcher {
@@ -148,6 +158,7 @@ impl From<RoomDispatcherInput> for RoomDispatcher {
             timeout_sender,
             timeout_receiver,
             return_room_prefix: value.return_room_prefix,
+            add_random_postfix: value.add_random_postfix,
         }
     }
 }

@@ -23,7 +23,7 @@ impl TryFrom<OscMessage> for RoomDispatcherInput {
     #[instrument(skip_all)]
     fn try_from(message: OscMessage) -> Result<RoomDispatcherInput, Self::Error> {
         match message.args.len() {
-            6 => Ok(RoomDispatcherInput {
+            7 => Ok(RoomDispatcherInput {
                 name: message.args[0].clone().string().ok_or(())?,
                 admin_password: message.args[1].clone().string(),
                 rule: message.args[2].clone().string().ok_or(())?,
@@ -34,6 +34,7 @@ impl TryFrom<OscMessage> for RoomDispatcherInput {
                 .unwrap_or(DispatcherType::Random),
                 timeout: message.args[3].clone().int().ok_or(())?,
                 return_room_prefix: message.args[4].clone().string(),
+                add_random_postfix: message.args[6].clone().int().unwrap_or(0) >= 1,
             }),
             _ => {
                 trace!("Invaild length of room dispatch OSC message");

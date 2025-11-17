@@ -317,13 +317,15 @@ Alpine.store("stecker", {
      * @param {string} name
      * @param {string} roomType
      * @param {string|null} returnRoomPrefix
+     * @param {boolean} addRandomPostfix
      */
-    async joinRoom(name, roomType, returnRoomPrefix) {
+    async joinRoom(name, roomType, returnRoomPrefix, addRandomPostfix) {
         // @todo derived from graphQL, but in js we use lowercase
         roomType = roomType.toLowerCase();
 
         if(returnRoomPrefix != null) {
-            const returnRoomName = `${returnRoomPrefix}${name}`;
+            let randomString = addRandomPostfix ? (Math.random() + 1).toString(36).substring(7) : '';
+            let returnRoomName = `${returnRoomPrefix}${name}${randomString}`;
             console.log(`Create return room ${returnRoomName}`);
             this.createRoom(returnRoomName, roomType);
         }

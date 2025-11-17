@@ -78,14 +78,13 @@ pub async fn dispatcher_view(
                 match room_result {
                     Ok(room) => {
                         // @todo how to make this type safe?
-                        let uri = match dispatcher.return_room_prefix.clone() {
-                            Some(return_roof_prefix) => {
-                                format!("/s/{}?returnRoomPrefix={}", room.name, return_roof_prefix)
-                            }
-                            None => {
-                                format!("/s/{}", room.name)
-                            }
-                        };
+                        let mut uri = format!("/s/{}?", room.name);
+                        if let Some(return_prefix) = dispatcher.return_room_prefix.clone() {
+                            uri.push_str(format!("&returnRoomPrefix={}", return_prefix).as_str());
+                        }
+                        if dispatcher.add_random_postfix {
+                            uri.push_str("&addRandomPostfix=1");
+                        }
                         Ok(Redirect::to(&uri.as_str()).into_response())
                     }
                     Err(_) => {
