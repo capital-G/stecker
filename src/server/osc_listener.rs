@@ -187,8 +187,16 @@ impl Decoder for OscDecoder {
     type Error = io::Error;
 
     fn decode(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
-        if src.is_empty() {
-            // No data left to decode: likely EOF
+        // OSC TCP needs to start w/ 4 big endian bytes indicating its length
+        if src.len() < 4 {
+            return Ok(None);
+        }
+
+        let mut length_buf = &src[..4];
+        let len = length_buf.get_u32() as usize;
+
+        // waiting for full frame
+        if src.len() < 4 + len {
             return Ok(None);
         }
 
