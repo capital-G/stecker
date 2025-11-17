@@ -13,8 +13,9 @@ use shared::{
     models::{DataRoomInternalType, SteckerAudioChannel, SteckerData},
 };
 use tokio::sync::broadcast::Sender;
-use tracing::{error, info, instrument, trace, warn, Instrument, Span};
+use tracing::{debug, error, info, instrument, trace, warn, Instrument, Span};
 use uuid::Uuid;
+use webrtc::ice_transport::ice_gatherer_state;
 use webrtc::track::track_local::track_local_static_rtp::TrackLocalStaticRTP;
 use webrtc::track::track_local::TrackLocalWriter;
 
@@ -408,7 +409,7 @@ pub struct AudioBroadcastRoom {
 pub struct AudioBroadcastRoomWithOffer {
     pub audio_broadcast_room: AudioBroadcastRoom,
     pub offer: String,
-    pub connection_events: Sender<ConnectionEvent>,
+    pub connection_events: Arc<Sender<ConnectionEvent>>,
 }
 
 impl AudioBroadcastRoom {
@@ -498,7 +499,9 @@ impl AudioBroadcastRoom {
         });
     }
 
+    #[instrument(skip_all)]
     pub async fn join_room(&self, offer: &str) -> anyhow::Result<ResponseOffer> {
+        trace!("Join room");
         let connection = SteckerWebRTCConnection::build_connection().await?;
         let _meta_channel = connection.register_channel(&DataRoomInternalType::Meta);
 
@@ -520,21 +523,36 @@ impl AudioBroadcastRoom {
                 tokio::spawn(async move {
                     loop {
                         match connection_events.recv().await {
-                            Ok(event) => match event {
-                                ConnectionEvent::Connected => {
-                                    let new_num_listeners = *num_listeners.borrow() + 1;
-                                    let _ = num_listeners.send(new_num_listeners);
-                                }
-                                ConnectionEvent::ConnectionClosed => {
-                                    let new_num_listeners = *num_listeners.borrow() - 1;
-                                    let _ = num_listeners.send(new_num_listeners);
-                                    break;
+                            Ok(connection_event) => {
+                                match connection_event {
+                                    ConnectionEvent::NewICEConnectionState(ice_connection_state) => {
+                                        match ice_connection_state {
+                                            webrtc::ice_transport::ice_connection_state::RTCIceConnectionState::Connected => {
+                                                let new_num_listeners = *num_listeners.borrow() + 1;
+                                                let _ = num_listeners.send(new_num_listeners);
+                                            },
+                                            webrtc::ice_transport::ice_connection_state::RTCIceConnectionState::Completed | webrtc::ice_transport::ice_connection_state::RTCIceConnectionState::Disconnected => {
+                                                let new_num_listeners = *num_listeners.borrow() - 1;
+                                                let _ = num_listeners.send(new_num_listeners);
+                                                let _ = connection.close().await;
+                                                break
+                                            },
+                                            _ => {
+                                                trace!("Unknown connection state: {ice_connection_state}");
+                                            }
+                                        }
+                                    },
+                                    ConnectionEvent::NewPeerConnectionState(_rtcpeer_connection_state) => {},
                                 }
                             },
-                            Err(_) => break,
+                            Err(err) => {
+                                error!(?err, "Receiving error");
+                                break;
+                            },
                         }
                     }
-                });
+                    trace!("Stop listening for connection events");
+                }.in_current_span());
 
                 Ok(response_offer)
             }

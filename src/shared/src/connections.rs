@@ -8,7 +8,7 @@ use anyhow::anyhow;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use tokio::sync::broadcast::{self, Receiver, Sender};
-use tracing::{info, instrument, trace, warn, Instrument, Span};
+use tracing::{error, info, instrument, trace, warn, Instrument, Span};
 use webrtc::api::interceptor_registry::register_default_interceptors;
 use webrtc::api::media_engine::{MediaEngine, MIME_TYPE_OPUS};
 use webrtc::api::APIBuilder;
@@ -18,6 +18,7 @@ use webrtc::ice_transport::ice_connection_state::RTCIceConnectionState;
 use webrtc::ice_transport::ice_server::RTCIceServer;
 use webrtc::interceptor::registry::Registry;
 use webrtc::peer_connection::configuration::RTCConfiguration;
+use webrtc::peer_connection::peer_connection_state::RTCPeerConnectionState;
 use webrtc::peer_connection::sdp::session_description::RTCSessionDescription;
 use webrtc::peer_connection::RTCPeerConnection;
 use webrtc::rtp_transceiver::rtp_codec::RTCRtpCodecCapability;
@@ -27,20 +28,21 @@ use webrtc::track::track_remote::TrackRemote;
 
 #[derive(Clone, Debug)]
 pub enum ConnectionEvent {
-    Connected,
-    ConnectionClosed,
+    NewICEConnectionState(RTCIceConnectionState),
+    NewPeerConnectionState(RTCPeerConnectionState),
 }
 
 /// This handles all the setup of a WebRTC peer connection.
 pub struct SteckerWebRTCConnection {
     peer_connection: RTCPeerConnection,
     data_channel_map: Arc<Mutex<DataChannelMap>>,
-    pub connection_events: Sender<ConnectionEvent>,
+    pub connection_events: Arc<Sender<ConnectionEvent>>,
 }
 
 impl SteckerWebRTCConnection {
     #[instrument]
     pub async fn build_connection() -> anyhow::Result<Self> {
+        trace!("Build connection");
         let mut m = MediaEngine::default();
         m.register_default_codecs()?;
 
@@ -62,42 +64,51 @@ impl SteckerWebRTCConnection {
 
         let peer_connection = api.new_peer_connection(config).await?;
 
-        let (connection_events_sender, _) = broadcast::channel::<ConnectionEvent>(1);
-        let connection_events_sender2 = connection_events_sender.clone();
+        let (connection_events_sender, _) = broadcast::channel::<ConnectionEvent>(4);
+        let sender = Arc::new(connection_events_sender);
 
-        let span = Span::current();
-        peer_connection.on_ice_connection_state_change(Box::new(move |state| {
-            let connection_events_sender3 = connection_events_sender.clone();
-            let span2 = span.clone();
-            Box::pin(
-                async move {
-                    match state {
-                        RTCIceConnectionState::Disconnected => {
-                            info!("Connection closed");
-                            let _ =
-                                connection_events_sender3.send(ConnectionEvent::ConnectionClosed);
-                        }
-                        RTCIceConnectionState::Connected => {
-                            info!("Connected");
-                            let _ = connection_events_sender3.send(ConnectionEvent::Connected);
-                        }
-                        state => {
-                            trace!(?state, "New connection state");
-                        }
+        let ice_span = Span::current();
+        peer_connection.on_ice_connection_state_change(Box::new({
+            let sender = Arc::clone(&sender);
+
+            move |state| {
+                let sender = Arc::clone(&sender);
+                Box::pin(
+                    async move {
+                        trace!(?state, "New ICE connection state");
+                        let _ = sender.send(ConnectionEvent::NewICEConnectionState(state));
                     }
-                }
-                .instrument(span2),
-            )
+                    .instrument(ice_span.clone()),
+                )
+            }
+        }));
+
+        let peer_span = Span::current();
+        peer_connection.on_peer_connection_state_change(Box::new({
+            let sender = Arc::clone(&sender);
+
+            move |state| {
+                let sender = Arc::clone(&sender);
+                Box::pin(
+                    async move {
+                        trace!(?state, "New peer connection state");
+                        let _ = sender.send(ConnectionEvent::NewPeerConnectionState(state));
+                    }
+                    .instrument(peer_span.clone()),
+                )
+            }
         }));
 
         Ok(Self {
             peer_connection,
-            connection_events: connection_events_sender2,
+            connection_events: sender,
             data_channel_map: Arc::new(Mutex::new(DataChannelMap(Mutex::new(HashMap::new())))),
         })
     }
 
+    #[instrument(skip_all)]
     pub async fn respond_to_offer(&self, offer: String) -> anyhow::Result<String> {
+        trace!("Responding to offer");
         let desc_data = decode_b64(&offer)?;
         let offer = serde_json::from_str::<RTCSessionDescription>(&desc_data)?;
 
@@ -127,6 +138,7 @@ impl SteckerWebRTCConnection {
 
     #[instrument(skip_all, err)]
     pub async fn create_offer(&self) -> anyhow::Result<String> {
+        trace!("Creating offer");
         // Create an offer to send to the browser
         let offer = self.peer_connection.create_offer(None).await?;
 
@@ -150,17 +162,21 @@ impl SteckerWebRTCConnection {
         }
     }
 
+    #[instrument(skip_all, err)]
     pub async fn set_remote_description(
         &self,
         description: RTCSessionDescription,
     ) -> anyhow::Result<()> {
+        trace!("Set remove description");
         Ok(self
             .peer_connection
             .set_remote_description(description)
             .await?)
     }
 
+    #[instrument(skip_all)]
     pub async fn close(&self) -> anyhow::Result<()> {
+        trace!("Close stecker webrtc connection");
         Ok(self.peer_connection.close().await?)
     }
 
@@ -170,6 +186,7 @@ impl SteckerWebRTCConnection {
         stecker_channel: Arc<SteckerDataChannel>,
         channel_type: SteckerDataChannelType,
     ) {
+        trace!("Connect channel");
         let stecker_channel2 = stecker_channel.clone();
         let stecker_channel3 = stecker_channel.clone();
         let data_channel2 = data_channel.clone();
@@ -185,6 +202,7 @@ impl SteckerWebRTCConnection {
         data_channel.on_open(Box::new(move || {
             Box::pin(
                 async move {
+                    trace!("Started data channel connection thread");
                     let mut outbound_msg_rx = stecker_channel2.outbound.subscribe();
                     let mut close_rx = stecker_channel2.close.subscribe();
 
@@ -221,6 +239,7 @@ impl SteckerWebRTCConnection {
         }));
 
         data_channel.on_message(Box::new(move |message: DataChannelMessage| {
+            trace!(?message, "Received data channel message");
             let msg = match channel_type {
                 SteckerDataChannelType::Float => SteckerData::decode_float(message),
                 SteckerDataChannelType::String => SteckerData::decode_string(message),
@@ -239,7 +258,9 @@ impl SteckerWebRTCConnection {
     ///
     /// Remember to call start_listening_for_data_channel to start listening
     /// for channels from the other side.
+    #[instrument(skip_all)]
     pub fn register_channel(&self, room_type: &DataRoomInternalType) -> Arc<SteckerDataChannel> {
+        trace!("Register channel");
         let stecker_channel = Arc::new(SteckerDataChannel::create_channels(
             SteckerDataChannelType::from(room_type.clone()),
         ));
@@ -253,7 +274,9 @@ impl SteckerWebRTCConnection {
 
     // other party builds data channel and we listen for it
     // should only be called once.
+    #[instrument(skip_all)]
     pub async fn start_listening_for_data_channel(&self) {
+        trace!("Start listening for channel");
         let span = Span::current().clone();
 
         let map = self.data_channel_map.clone();
@@ -278,10 +301,12 @@ impl SteckerWebRTCConnection {
     }
 
     // we build data channel, other party has to listen
+    #[instrument(skip_all)]
     pub async fn create_data_channel(
         &self,
         room_type: &DataRoomInternalType,
     ) -> anyhow::Result<SteckerDataChannel> {
+        trace!("Create data channel");
         let stecker_channel =
             SteckerDataChannel::create_channels(SteckerDataChannelType::from(room_type.clone()));
         let stecker_channel2 = Arc::new(stecker_channel.clone());
@@ -300,7 +325,9 @@ impl SteckerWebRTCConnection {
         Ok(stecker_channel)
     }
 
+    #[instrument(skip_all)]
     pub async fn create_audio_channel(&self) -> anyhow::Result<Arc<TrackLocalStaticSample>> {
+        trace!("Create audio channel");
         let audio_track = Arc::new(TrackLocalStaticSample::new(
             RTCRtpCodecCapability {
                 mime_type: MIME_TYPE_OPUS.to_owned(),
@@ -317,7 +344,9 @@ impl SteckerWebRTCConnection {
         Ok(audio_track)
     }
 
+    #[instrument(skip_all)]
     pub async fn listen_for_remote_audio_track(&self) -> Receiver<Arc<TrackRemote>> {
+        trace!("Listen for remote audio track");
         let (remote_track_tx, remote_track_rx) = tokio::sync::broadcast::channel(2);
 
         let _ = self
@@ -328,15 +357,23 @@ impl SteckerWebRTCConnection {
             )
             .await;
 
+        let span = Span::current();
         self.peer_connection.on_track(Box::new(move |track, _, _| {
             let _ = remote_track_tx.send(track);
-            Box::pin(async {})
+            Box::pin(
+                async {
+                    trace!("Seen new track");
+                }
+                .instrument(span.clone()),
+            )
         }));
 
         remote_track_rx
     }
 
+    #[instrument(skip_all)]
     pub async fn add_existing_audio_track(&self, track: Arc<TrackLocalStaticRTP>) -> () {
+        trace!("Add existing audio track");
         let _ = self.peer_connection.add_track(track).await;
         // maybe add this one as well
         // https://github.com/webrtc-rs/webrtc/blob/62f2550799efe2dd36cdc950ad3f334b120c75bb/examples/examples/broadcast/broadcast.rs#L258-L265
