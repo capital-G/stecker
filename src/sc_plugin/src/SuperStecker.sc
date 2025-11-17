@@ -68,13 +68,14 @@ SteckerOSC {
 		}
 	}
 
-	*connect {
+	*connect {|callback|
 		if(SteckerOSC.connected.not, {
 			netAddr = NetAddr(host, port);
 			netAddr.tryConnectTCP(
 				onComplete: {
 					"Connected".postln;
 					thisProcess.addOSCRecvFunc(recvFunc);
+					callback.value();
 				},
 				onFailure: {
 					"Failed to connect to Stecker OSC host".warn;
