@@ -141,6 +141,12 @@ DataSteckerOut : UGen {
 	*kr {|input, roomName, password=nil, host=nil|
 		host = host ? Stecker.host;
 		password = password ?? {Stecker.hasher(roomName)};
+
+		if(input.asArray.size > 1, {
+			"Stecker only supports mono channels - reducing input signal to first channel".warn;
+			input = input[0];
+		});
+
 		^this.new1('control', input, roomName, password, host);
 	}
 
@@ -179,6 +185,12 @@ SteckerOut : UGen {
 	*ar {|input, roomName, password=nil, host=nil|
 		host = host ? Stecker.host;
 		password = password ?? {Stecker.hasher(roomName)};
+
+		if(input.asArray.size > 1, {
+			"Stecker only supports mono channels - reducing input signal to first channel".warn;
+			input = input[0];
+		});
+
 		^this.new1('audio', input, roomName, password, host);
 	}
 
