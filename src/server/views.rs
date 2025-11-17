@@ -44,10 +44,13 @@ pub async fn stream_view(
     let room_guard = state.audio_rooms.map.read().await;
     let room_value = room_guard.get(&room_name);
 
-    let room_name = room_value
-        .map(async |room| room.read().await.meta().name.to_owned())
-        .expect("failed to access rooms")
-        .await;
+    let room_name = match room_value {
+        Some(room) => {
+            let guard = room.read().await;
+            Some(guard.meta().name.clone())
+        }
+        None => None,
+    };
 
     let template = state
         .jinja
