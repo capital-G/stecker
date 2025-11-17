@@ -3,7 +3,6 @@ use std::{collections::HashMap, future::Future, path::PathBuf, sync::Arc, time::
 use tracing::{info, Instrument};
 
 use minijinja;
-use rand::{rngs::StdRng, seq::SliceRandom, SeedableRng};
 use tokio::{sync::RwLock, time::sleep};
 
 use crate::{
@@ -277,15 +276,10 @@ impl RoomMapTrait for RoomMap {
             .collect()
             .await;
 
-        match dispatcher.dispatcher_type {
-            crate::models::DispatcherType::Random => {
-                if let Some(room) = matched_rooms.choose(&mut StdRng::from_entropy()) {
-                    let room_lock = room.read().await;
-                    return Ok((&*room_lock).into());
-                } else {
-                    return Err(anyhow::anyhow!("Did not match any room"));
-                }
-            }
-        }
+        dispatcher
+            .dispatcher_type
+            .choose_room(matched_rooms)
+            .await
+            .ok_or(anyhow::anyhow!("Could not find matching room"))
     }
 }
