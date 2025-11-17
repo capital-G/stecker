@@ -32,7 +32,7 @@
         align-items: center;
     ">
         <button
-            @click="$store.stecker.joinRoom('foo_1', 'AUDIO', returnRoomPrefix)"
+            @click="$store.stecker.joinRoom('{{ room_name }}', 'AUDIO', returnRoomPrefix)"
             :style="{border: '4px solid ' + borderColor()}"
             style="
                 padding:2rem 4rem;
