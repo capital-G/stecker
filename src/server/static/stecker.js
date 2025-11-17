@@ -30,6 +30,7 @@ class SteckerConnection {
                         document.getElementById(attachToHTMLPlayer).srcObject = stream;
                     }
                     resolve(stream);
+                    Alpine.store("stecker").isPlaying = true;
                 })
                 .catch(error => {
                     console.error(`Error obtaining media device: ${error}`);
@@ -46,6 +47,7 @@ class SteckerConnection {
 
         this.peerConnection.ontrack = function (event) {
         //   var el = document.getElementById(attachToHTMLPlayer);
+          Alpine.store("stecker").isPlaying = true;
           htmlPlayer.srcObject = event.streams[0]
           htmlPlayer.autoplay = true
           htmlPlayer.controls = true
@@ -57,6 +59,7 @@ class SteckerConnection {
      */
     async generateLocalSessionDescription() {
         let that = this;
+        Alpine.store("stecker").isConnecting = true;
         return new Promise((resolve) => {
             that.peerConnection.oniceconnectionstatechange = (e) => console.log(`ICE connection state: ${that.peerConnection.iceConnectionState}`);
             that.peerConnection.onicecandidate = (event) => {
@@ -150,6 +153,9 @@ Alpine.store("stecker", {
 
     floatValue: 0.0,
     chatValue: "",
+
+    isConnecting: false,
+    isPlaying: false,
 
     /**
      *
