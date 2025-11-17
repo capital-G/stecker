@@ -31,6 +31,19 @@ pub enum DispatcherType {
     NextFreeRandom,
 }
 
+impl TryFrom<String> for DispatcherType {
+    type Error = ();
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        match value.to_ascii_lowercase().as_str() {
+            "random" => Ok(DispatcherType::Random),
+            "nextfreealpha" => Ok(DispatcherType::NextFreeAlphabetical),
+            "nextfreerandom" => Ok(DispatcherType::NextFreeRandom),
+            _ => Err(()),
+        }
+    }
+}
+
 impl DispatcherType {
     pub async fn choose_room(&self, rooms: Vec<Arc<RwLock<BroadcastRoom>>>) -> Option<Room> {
         let mut empty_rooms: Vec<(String, Arc<RwLock<BroadcastRoom>>)> =

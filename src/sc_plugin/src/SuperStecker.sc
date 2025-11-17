@@ -100,7 +100,7 @@ SteckerOSC {
 		});
 	}
 
-	*createDispatcher {|name, password, rule, timeout=1000|
+	*createDispatcher {|name, password, rule, timeout=1000, dispatcherType=nil, returnRoomPrefix=nil|
 		if(SteckerOSC.connected.not, {
 			"SteckerOSC is not connected".warn;
 			^this;
@@ -111,11 +111,25 @@ SteckerOSC {
 			password,
 			rule,
 			timeout.asInteger,
+			returnRoomPrefix,
+			dispatcherType ? SteckerOSC.dispatcherNextRandom,
 		);
 	}
 
 	*onRoomNews {|roomName, callback|
 		newsCallbacks[roomName.asSymbol] = callback;
+	}
+
+	*dispatcherRandom {
+		^"random";
+	}
+
+	*dispatcherNextAlpha {
+		^"nextfreealpha";
+	}
+
+	*dispatcherNextRandom {
+		^"nextfreerandom";
 	}
 }
 

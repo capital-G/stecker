@@ -23,12 +23,15 @@ impl TryFrom<OscMessage> for RoomDispatcherInput {
     #[instrument(skip_all)]
     fn try_from(message: OscMessage) -> Result<RoomDispatcherInput, Self::Error> {
         match message.args.len() {
-            5 => Ok(RoomDispatcherInput {
+            6 => Ok(RoomDispatcherInput {
                 name: message.args[0].clone().string().ok_or(())?,
                 admin_password: message.args[1].clone().string(),
                 rule: message.args[2].clone().string().ok_or(())?,
                 room_type: RoomType::Audio,
-                dispatcher_type: DispatcherType::Random,
+                dispatcher_type: DispatcherType::try_from(
+                    message.args[5].clone().string().unwrap_or("".to_string()),
+                )
+                .unwrap_or(DispatcherType::Random),
                 timeout: message.args[3].clone().int().ok_or(())?,
                 return_room_prefix: message.args[4].clone().string(),
             }),
