@@ -68,13 +68,14 @@ SteckerOSC {
 		}
 	}
 
-	*connect {
+	*connect {|callback|
 		if(SteckerOSC.connected.not, {
 			netAddr = NetAddr(host, port);
 			netAddr.tryConnectTCP(
 				onComplete: {
 					"Connected".postln;
 					thisProcess.addOSCRecvFunc(recvFunc);
+					callback.value();
 				},
 				onFailure: {
 					"Failed to connect to Stecker OSC host".warn;
@@ -100,7 +101,7 @@ SteckerOSC {
 		});
 	}
 
-	*createDispatcher {|name, password, rule, timeout=1000|
+	*createDispatcher {|name, password, rule, timeout=1000, dispatcherType=nil, returnRoomPrefix=nil|
 		if(SteckerOSC.connected.not, {
 			"SteckerOSC is not connected".warn;
 			^this;
@@ -111,11 +112,25 @@ SteckerOSC {
 			password,
 			rule,
 			timeout.asInteger,
+			returnRoomPrefix,
+			dispatcherType ? SteckerOSC.dispatcherNextRandom,
 		);
 	}
 
 	*onRoomNews {|roomName, callback|
 		newsCallbacks[roomName.asSymbol] = callback;
+	}
+
+	*dispatcherRandom {
+		^"random";
+	}
+
+	*dispatcherNextAlpha {
+		^"nextfreealpha";
+	}
+
+	*dispatcherNextRandom {
+		^"nextfreerandom";
 	}
 }
 

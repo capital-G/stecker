@@ -2,29 +2,69 @@
 
 {% block content %}
 
+<div x-data="{
+        returnRoomPrefix: new URLSearchParams(location.search).get('returnRoomPrefix'),
+        addRandomPostfix: parseInt(new URLSearchParams(location.search).get('addRandomPostfix')) >= 1,
+        volume: 80,
+        borderColor() {return $store.stecker.isPlaying ? 'greenyellow' : 'orange'},
+        clickedPlay: false,
+    }
+    "
+    style="
+    display:flex;
+    flex-direction: column;
+    align-items:center;
+    height: 100vh;
+    max-width:600px;
+    margin:auto;
+">
 {% if room_name %}
-    <h2>{{ room_name }}</h2>
+    <div style="flex-grow: 0.7;">
+        <h1 style="
+        font-size:3rem;
+        padding: 3rem;
+        font-weight:bold;
+        margin:0;
+    ">{{ room_name }}</h1>
+    </div>
 
-    <p>
+    <div style="
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+    ">
         <button
-            class="button"
-            @click="$store.stecker.joinRoom('{{ room_name }}', 'AUDIO')"
-            x-bind:disabled="$store.stecker.connectedRoom"
-        >
-            Start playing
-        </button>
-    </p>
+            @click="$store.stecker.joinRoom('{{ room_name }}', 'AUDIO', returnRoomPrefix, addRandomPostfix); clickedPlay=true;"
+            :style="{backgroundColor: borderColor()}"
+            :disabled="clickedPlay"
+            style="
+                padding:2rem 4rem;
+                font-size:1.5rem;
+                font-weight:bold;
+                cursor:pointer;"
+            >▶</button>
 
-    <p>
-        <div class="field">
-            <label class="label">Audio</label>
-            <div class="control">
-                <audio controls style="width: 100%;" id="audio-player"></audio>
-            </div>
-        </div>
-    </p>
+        <audio id="audio-player" controls="controls" style="visibility: hidden;"></audio>
+
+        <input type="range" min="0" max="100" value="80"
+            x-model="volume"
+            oninput="document.getElementById('audio-player').volume = this.value / 100"
+            style="
+                width:100%;
+                margin-top:1rem;"
+        >
+    </div>
 {% else %}
-    <p>Room does not exist.</p>
+    <div style="flex-grow: 0.3;">
+        <h1 style="
+        font-size:3rem;
+        padding: 3rem;
+        font-weight:bold;
+        margin:0;
+    ">Room not available</h1>
+    </div>
 {% endif %}
+
+</div>
 
 {% endblock %}

@@ -1,11 +1,12 @@
 use std::{fmt::Display, sync::Arc, time::Duration};
 
 use async_graphql::{Enum, InputObject, Object, SimpleObject};
-use rand::rngs::StdRng;
+use futures::stream::{self, StreamExt};
 use rand::{
     distributions::{Alphanumeric, DistString},
     SeedableRng,
 };
+use rand::{rngs::StdRng, seq::SliceRandom};
 use regex::Regex;
 use shared::connections::ConnectionEvent;
 use shared::{
@@ -13,9 +14,9 @@ use shared::{
     models::{DataRoomInternalType, SteckerAudioChannel, SteckerData},
 };
 use tokio::sync::broadcast::Sender;
+use tokio::sync::RwLock;
 use tracing::{debug, error, info, instrument, trace, warn, Instrument, Span};
 use uuid::Uuid;
-use webrtc::ice_transport::ice_gatherer_state;
 use webrtc::track::track_local::track_local_static_rtp::TrackLocalStaticRTP;
 use webrtc::track::track_local::TrackLocalWriter;
 
@@ -26,6 +27,65 @@ use crate::event_service::RoomEvent;
 #[derive(Enum, Copy, Clone, Eq, PartialEq, Debug)]
 pub enum DispatcherType {
     Random,
+    NextFreeAlphabetical,
+    NextFreeRandom,
+}
+
+impl TryFrom<String> for DispatcherType {
+    type Error = ();
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        match value.to_ascii_lowercase().as_str() {
+            "random" => Ok(DispatcherType::Random),
+            "nextfreealpha" => Ok(DispatcherType::NextFreeAlphabetical),
+            "nextfreerandom" => Ok(DispatcherType::NextFreeRandom),
+            _ => Err(()),
+        }
+    }
+}
+
+impl DispatcherType {
+    pub async fn choose_room(&self, rooms: Vec<Arc<RwLock<BroadcastRoom>>>) -> Option<Room> {
+        let mut empty_rooms: Vec<(String, Arc<RwLock<BroadcastRoom>>)> =
+            stream::iter(rooms.clone())
+                .then(|room| async move {
+                    let (listeners, name) = {
+                        let guard = room.read().await;
+                        let listeners = *guard.meta().num_listeners.borrow();
+                        let name = guard.meta().name.clone();
+                        (listeners, name)
+                    };
+                    (listeners <= 0, name, room)
+                })
+                .filter(|(ok, _name, _room)| futures::future::ready(*ok))
+                .map(|(_ok, name, room)| (name, room))
+                .collect()
+                .await;
+
+        match self {
+            DispatcherType::Random => {
+                if let Some(room) = rooms.choose(&mut StdRng::from_entropy()) {
+                    let room_lock = room.read().await;
+                    return Some((&*room_lock).into());
+                } else {
+                    None
+                }
+            }
+            DispatcherType::NextFreeAlphabetical => {
+                empty_rooms.sort_by(|a, b| a.0.cmp(&b.0));
+                match empty_rooms.first() {
+                    Some((_, room)) => Some((&*room.read().await).into()),
+                    None => None,
+                }
+            }
+            DispatcherType::NextFreeRandom => {
+                match empty_rooms.choose(&mut StdRng::from_entropy()) {
+                    Some((_, room)) => Some((&*room.read().await).into()),
+                    None => None,
+                }
+            }
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -37,6 +97,8 @@ pub struct RoomDispatcher {
     pub dispatcher_type: DispatcherType,
     pub timeout_sender: tokio::sync::watch::Sender<Duration>,
     pub timeout_receiver: tokio::sync::watch::Receiver<Duration>,
+    pub return_room_prefix: Option<String>,
+    pub add_random_postfix: bool,
 }
 
 // graphql conversion
@@ -57,6 +119,14 @@ impl RoomDispatcher {
     async fn dispatcher_type(&self) -> DispatcherType {
         self.dispatcher_type
     }
+
+    async fn return_room_prefix(&self) -> Option<String> {
+        self.return_room_prefix.clone()
+    }
+
+    async fn append_random_postfix(&self) -> bool {
+        self.add_random_postfix
+    }
 }
 
 #[derive(InputObject, Clone)]
@@ -67,6 +137,8 @@ pub struct RoomDispatcherInput {
     pub room_type: RoomType,
     pub dispatcher_type: DispatcherType,
     pub timeout: i32,
+    pub return_room_prefix: Option<String>,
+    pub add_random_postfix: bool,
 }
 
 impl From<RoomDispatcherInput> for RoomDispatcher {
@@ -85,6 +157,8 @@ impl From<RoomDispatcherInput> for RoomDispatcher {
             dispatcher_type: value.dispatcher_type,
             timeout_sender,
             timeout_receiver,
+            return_room_prefix: value.return_room_prefix,
+            add_random_postfix: value.add_random_postfix,
         }
     }
 }

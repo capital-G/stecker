@@ -30,6 +30,7 @@ class SteckerConnection {
                         document.getElementById(attachToHTMLPlayer).srcObject = stream;
                     }
                     resolve(stream);
+                    Alpine.store("stecker").isPlaying = true;
                 })
                 .catch(error => {
                     console.error(`Error obtaining media device: ${error}`);
@@ -46,6 +47,7 @@ class SteckerConnection {
 
         this.peerConnection.ontrack = function (event) {
         //   var el = document.getElementById(attachToHTMLPlayer);
+          Alpine.store("stecker").isPlaying = true;
           htmlPlayer.srcObject = event.streams[0]
           htmlPlayer.autoplay = true
           htmlPlayer.controls = true
@@ -57,6 +59,7 @@ class SteckerConnection {
      */
     async generateLocalSessionDescription() {
         let that = this;
+        Alpine.store("stecker").isConnecting = true;
         return new Promise((resolve) => {
             that.peerConnection.oniceconnectionstatechange = (e) => console.log(`ICE connection state: ${that.peerConnection.iceConnectionState}`);
             that.peerConnection.onicecandidate = (event) => {
@@ -150,6 +153,9 @@ Alpine.store("stecker", {
 
     floatValue: 0.0,
     chatValue: "",
+
+    isConnecting: false,
+    isPlaying: false,
 
     /**
      *
@@ -310,10 +316,20 @@ Alpine.store("stecker", {
      *
      * @param {string} name
      * @param {string} roomType
+     * @param {string|null} returnRoomPrefix
+     * @param {boolean} addRandomPostfix
      */
-    async joinRoom(name, roomType) {
+    async joinRoom(name, roomType, returnRoomPrefix, addRandomPostfix) {
         // @todo derived from graphQL, but in js we use lowercase
         roomType = roomType.toLowerCase();
+
+        if(returnRoomPrefix != null) {
+            let randomString = addRandomPostfix ? (Math.random() + 1).toString(36).substring(7) : '';
+            let returnRoomName = `${returnRoomPrefix}${name}${randomString}`;
+            console.log(`Create return room ${returnRoomName}`);
+            this.createRoom(returnRoomName, roomType);
+        }
+
         let steckerConnection = new SteckerConnection();
 
         new SteckerDataChannel(steckerConnection, "meta", (msg) => {

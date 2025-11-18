@@ -44,10 +44,13 @@ pub async fn stream_view(
     let room_guard = state.audio_rooms.map.read().await;
     let room_value = room_guard.get(&room_name);
 
-    let room_name = room_value
-        .map(async |room| room.read().await.meta().name.to_owned())
-        .expect("failed to access rooms")
-        .await;
+    let room_name = match room_value {
+        Some(room) => {
+            let guard = room.read().await;
+            Some(guard.meta().name.clone())
+        }
+        None => None,
+    };
 
     let template = state
         .jinja
@@ -75,7 +78,14 @@ pub async fn dispatcher_view(
                 match room_result {
                     Ok(room) => {
                         // @todo how to make this type safe?
-                        Ok(Redirect::to(format!("/s/{}", room.name).as_str()).into_response())
+                        let mut uri = format!("/s/{}?", room.name);
+                        if let Some(return_prefix) = dispatcher.return_room_prefix.clone() {
+                            uri.push_str(format!("&returnRoomPrefix={}", return_prefix).as_str());
+                        }
+                        if dispatcher.add_random_postfix {
+                            uri.push_str("&addRandomPostfix=1");
+                        }
+                        Ok(Redirect::to(&uri.as_str()).into_response())
                     }
                     Err(_) => {
                         let template = state

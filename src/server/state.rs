@@ -3,7 +3,6 @@ use std::{collections::HashMap, future::Future, path::PathBuf, sync::Arc, time::
 use tracing::{info, Instrument};
 
 use minijinja;
-use rand::{rngs::StdRng, seq::SliceRandom, SeedableRng};
 use tokio::{sync::RwLock, time::sleep};
 
 use crate::{
@@ -149,6 +148,7 @@ impl AppState {
 
         let dispatcher_map_lock = self.room_dispatchers.clone();
         let name2 = name.clone();
+        let dispatcher_deleted_event = self.room_events.clone();
         tokio::spawn(
             async move {
                 loop {
@@ -159,6 +159,8 @@ impl AppState {
                     }
                 }
                 info!("Dispatcher timed out - will be deleted now");
+                let _ =
+                    dispatcher_deleted_event.send(RoomEvent::BroadcastRoomDeleted(name2.clone()));
                 dispatcher_map_lock.write().await.remove(&name2);
             }
             .in_current_span(),
@@ -277,15 +279,10 @@ impl RoomMapTrait for RoomMap {
             .collect()
             .await;
 
-        match dispatcher.dispatcher_type {
-            crate::models::DispatcherType::Random => {
-                if let Some(room) = matched_rooms.choose(&mut StdRng::from_entropy()) {
-                    let room_lock = room.read().await;
-                    return Ok((&*room_lock).into());
-                } else {
-                    return Err(anyhow::anyhow!("Did not match any room"));
-                }
-            }
-        }
+        dispatcher
+            .dispatcher_type
+            .choose_room(matched_rooms)
+            .await
+            .ok_or(anyhow::anyhow!("Could not find matching room"))
     }
 }
