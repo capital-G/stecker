@@ -1,8 +1,9 @@
 use futures::stream::{self, StreamExt};
+use minijinja_autoreload::AutoReloader;
 use std::{collections::HashMap, future::Future, path::PathBuf, sync::Arc, time::Duration};
 use tracing::{info, Instrument};
 
-use minijinja;
+use minijinja::{self, path_loader, Environment};
 use tokio::{sync::RwLock, time::sleep};
 
 use crate::{
@@ -18,13 +19,23 @@ pub struct AppState {
 
     pub room_events: tokio::sync::broadcast::Sender<RoomEvent>,
     pub jinja: Arc<minijinja::Environment<'static>>,
+    pub jinja_reloader: AutoReloader,
 }
 
 impl AppState {
     pub fn new() -> Self {
         let mut env = minijinja::Environment::new();
         let template_dir = std::env::current_dir().unwrap().join("templates");
-        env.set_loader(minijinja::path_loader(template_dir));
+        env.set_loader(minijinja::path_loader(template_dir.clone()));
+
+        let reloader = AutoReloader::new(move |notifier| {
+            let mut env = Environment::new();
+            env.set_loader(path_loader(&template_dir));
+
+            notifier.watch_path(&template_dir, true);
+
+            Ok(env)
+        });
 
         let (room_event_rx, _) = tokio::sync::broadcast::channel(32);
         Self {
@@ -43,6 +54,7 @@ impl AppState {
             room_dispatchers: Arc::new(RwLock::new(HashMap::new())),
             room_events: room_event_rx,
             jinja: Arc::new(env),
+            jinja_reloader: reloader,
         }
     }
 
