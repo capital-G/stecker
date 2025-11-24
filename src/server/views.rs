@@ -12,6 +12,7 @@ pub enum Template {
     Stream,
     DispatcherNotFound,
     DispatcherNoRoomAvailable,
+    Home,
 }
 
 impl Template {
@@ -21,6 +22,7 @@ impl Template {
             Template::Stream => "stream.html.jinja",
             Template::DispatcherNotFound => "dispatcher_not_found.html.jinja",
             Template::DispatcherNoRoomAvailable => "dispatcher_no_room_available.html.jinja",
+            Template::Home => "home.html.jinja",
         }
     }
 }
@@ -33,6 +35,21 @@ pub async fn debug_view(State(state): State<Arc<AppState>>) -> Html<String> {
     let rendered = template
         .render(minijinja::context! {})
         .expect("failed to render debug template");
+
+    Html(rendered)
+}
+
+pub async fn home_view(State(state): State<Arc<AppState>>) -> Html<String> {
+    let template_env = state.jinja_reloader.acquire_env().unwrap();
+    let template = template_env
+        // state
+        // .jinja
+        .get_template(Template::Home.as_str())
+        .expect("Stream template not found!");
+
+    let rendered = template
+        .render(minijinja::context! {})
+        .expect("Rendering of home view failed");
 
     Html(rendered)
 }
@@ -52,10 +69,13 @@ pub async fn stream_view(
         None => None,
     };
 
-    let template = state
-        .jinja
+    let template_env = state.jinja_reloader.acquire_env().unwrap();
+    let template = template_env
+        // state
+        // .jinja
         .get_template(Template::Stream.as_str())
         .expect("Stream template not found!");
+
     let rendered = template
         .render(minijinja::context! {
             room_name => room_name,

@@ -1,4 +1,9 @@
+use std::sync::Arc;
+
+use async_graphql::SimpleObject;
 use rosc::{OscMessage, OscPacket};
+
+use crate::models::{BroadcastRoomMeta, Room};
 
 #[derive(Debug, Clone)]
 pub enum RoomEvent {

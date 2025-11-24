@@ -1,6 +1,6 @@
 use std::{fmt::Display, sync::Arc, time::Duration};
 
-use async_graphql::{Enum, InputObject, Object, SimpleObject};
+use async_graphql::{Enum, InputObject, Object, SimpleObject, Union};
 use futures::stream::{self, StreamExt};
 use rand::{
     distributions::{Alphanumeric, DistString},
@@ -20,7 +20,7 @@ use uuid::Uuid;
 use webrtc::track::track_local::track_local_static_rtp::TrackLocalStaticRTP;
 use webrtc::track::track_local::TrackLocalWriter;
 
-use crate::event_service::RoomEvent;
+use crate::{event_service::RoomEvent, state::RoomMap};
 
 // graphql objects
 
@@ -244,7 +244,7 @@ impl From<RoomType> for DataRoomInternalType {
     }
 }
 
-#[derive(SimpleObject, Clone)]
+#[derive(SimpleObject, Clone, Debug)]
 pub struct Room {
     pub uuid: String,
     pub name: String,
@@ -720,4 +720,87 @@ impl Into<RoomType> for DataRoomInternalType {
 pub struct RoomCreationReply {
     pub offer: String,
     pub password: String,
+}
+
+#[derive(SimpleObject)]
+pub struct FullRoomList {
+    pub rooms: Vec<String>,
+}
+
+#[derive(SimpleObject)]
+pub struct RoomAdded {
+    pub room_name: String,
+}
+
+#[derive(SimpleObject)]
+pub struct RoomDeleted {
+    pub room_name: String,
+}
+
+#[derive(SimpleObject)]
+pub struct RoomUserUpdate {
+    pub room_name: String,
+    pub user_count: i32,
+}
+
+#[derive(SimpleObject)]
+pub struct UserLeftRoom {
+    pub room_name: String,
+}
+
+#[derive(SimpleObject)]
+pub struct RoomDispatcherCreated {
+    pub dispatcher_name: String,
+}
+
+#[derive(SimpleObject)]
+pub struct RoomDispatcherDeleted {
+    pub dispatcher_name: String,
+}
+
+#[derive(Union)]
+pub enum RoomUpdates {
+    Init(FullRoomList),
+    RoomAdded(RoomAdded),
+    RoomDeleted(RoomDeleted),
+    RoomUserUpdate(RoomUserUpdate),
+
+    RoomDispatcherCreated(RoomDispatcherCreated),
+    RoomDispatcherDeleted(RoomDispatcherDeleted),
+}
+
+impl From<RoomEvent> for RoomUpdates {
+    fn from(value: RoomEvent) -> Self {
+        match value {
+            RoomEvent::BroadcastRoomCreated(x) => {
+                RoomUpdates::RoomAdded(RoomAdded { room_name: x })
+            }
+            RoomEvent::BroadcastRoomUpdated(room_name) => {
+                RoomUpdates::RoomUserUpdate(RoomUserUpdate {
+                    room_name,
+                    user_count: 0,
+                })
+            }
+            RoomEvent::BroadcastRoomUserCount(room_name, user_count) => {
+                RoomUpdates::RoomUserUpdate(RoomUserUpdate {
+                    room_name,
+                    user_count,
+                })
+            }
+            RoomEvent::BroadcastRoomDeleted(room_name) => {
+                RoomUpdates::RoomDeleted(RoomDeleted { room_name })
+            }
+            RoomEvent::RoomDispatcherCreated(dispatcher_name) => {
+                RoomUpdates::RoomDispatcherCreated(RoomDispatcherCreated { dispatcher_name })
+            }
+            RoomEvent::RoomDispatcherDeleted(dispatcher_name) => {
+                RoomUpdates::RoomDispatcherDeleted(RoomDispatcherDeleted { dispatcher_name })
+            }
+            RoomEvent::RoomDispatcherReset() => {
+                RoomUpdates::RoomDispatcherDeleted(RoomDispatcherDeleted {
+                    dispatcher_name: "".to_string(),
+                })
+            }
+        }
+    }
 }

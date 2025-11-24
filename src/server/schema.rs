@@ -1,21 +1,24 @@
+use futures::StreamExt;
 use std::{sync::Arc, time::Duration};
 
 use crate::{
     event_service::RoomEvent,
     models::{
-        AudioBroadcastRoom, BroadcastRoom, DataBroadcastRoom, Room, RoomCreationReply,
-        RoomDispatcher, RoomDispatcherInput, RoomType,
+        AudioBroadcastRoom, BroadcastRoom, DataBroadcastRoom, FullRoomList, Room,
+        RoomCreationReply, RoomDispatcher, RoomDispatcherInput, RoomType, RoomUpdates,
     },
     state::RoomMapTrait,
 };
+use futures::Stream;
 use rand::distributions::{Alphanumeric, DistString};
 
 use anyhow::anyhow;
 use shared::models::API_VERSION;
 use tokio::{sync::RwLock, time::sleep};
 
-use async_graphql::{Context, Object};
-use tracing::{info, instrument, trace, Instrument, Span};
+use async_graphql::{Context, Object, SimpleObject, Subscription};
+use tokio_stream::wrappers::BroadcastStream;
+use tracing::{event, info, instrument, trace, Instrument, Span};
 use uuid::Uuid;
 
 use crate::AppState;
@@ -272,5 +275,30 @@ impl Mutation {
         } else {
             Err(anyhow!("Could not find a dispatcher with the given name"))
         }
+    }
+}
+
+pub struct Subscription;
+
+#[Subscription]
+impl Subscription {
+    async fn room_events<'a>(&self, ctx: &Context<'a>) -> impl Stream<Item = RoomUpdates> {
+        let state = ctx.data_unchecked::<Arc<AppState>>();
+        let events = state.room_events.subscribe();
+
+        let event_stream = BroadcastStream::new(events).filter_map(|room_event| async move {
+            match room_event {
+                Ok(event) => Some(RoomUpdates::from(event)),
+                Err(_) => None,
+            }
+        });
+
+        let init_message = RoomUpdates::Init(FullRoomList {
+            rooms: state.audio_rooms.map.read().await.keys().cloned().collect(),
+        });
+
+        let init_stream = futures::stream::once(async move { init_message });
+
+        init_stream.chain(event_stream)
     }
 }

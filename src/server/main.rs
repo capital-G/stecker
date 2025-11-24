@@ -7,11 +7,12 @@ pub mod views;
 
 use std::sync::Arc;
 
-use crate::schema::{Mutation, Query};
+use crate::schema::{Mutation, Query, Subscription};
+use crate::views::home_view;
 
 use async_graphql::extensions::Tracing;
 use async_graphql::{http::GraphiQLSource, EmptySubscription, Schema};
-use async_graphql_axum::GraphQL;
+use async_graphql_axum::{GraphQL, GraphQLSubscription};
 use axum::{
     response::{self, IntoResponse},
     routing::get,
@@ -50,7 +51,12 @@ struct Cli {
 }
 
 async fn graphiql() -> impl IntoResponse {
-    response::Html(GraphiQLSource::build().endpoint("/graphql").finish())
+    response::Html(
+        GraphiQLSource::build()
+            .subscription_endpoint("/ws")
+            .endpoint("/graphql")
+            .finish(),
+    )
 }
 
 #[tokio::main]
@@ -70,17 +76,22 @@ async fn main() {
     let app_state = Arc::new(AppState::new());
     let app_state2 = app_state.clone();
 
-    let schema = Schema::build(Query, Mutation, EmptySubscription)
+    let schema = Schema::build(Query, Mutation, Subscription)
         .data(app_state.clone())
         .extension(Tracing)
         .finish();
 
     let http_app = Router::new()
-        .route("/graphql", get(graphiql).post_service(GraphQL::new(schema)))
+        .route(
+            "/graphql",
+            get(graphiql).post_service(GraphQL::new(schema.clone())),
+        )
+        .route_service("/ws", GraphQLSubscription::new(schema))
         .nest_service("/static", ServeDir::new("static"))
         .route("/debug", get(debug_view))
         .route("/s/:name", get(stream_view))
         .route("/d/:name", get(dispatcher_view))
+        .route("/", get(home_view))
         .with_state(app_state.clone());
 
     let http_handle = tokio::spawn(async move {
