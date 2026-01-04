@@ -1,7 +1,4 @@
-use crate::{
-    models::{DataRoomPublicType, SteckerAPIRoomType},
-    utils::decode_b64,
-};
+use crate::{models::SteckerData, utils::decode_b64};
 use anyhow::bail;
 use reqwest::StatusCode;
 use serde::Deserialize;
@@ -51,49 +48,41 @@ impl APIClient {
     }
 }
 
-// @todo make this static?
-impl Into<String> for &SteckerAPIRoomType {
-    fn into(self) -> String {
-        match self {
-            SteckerAPIRoomType::Audio => "AUDIO".to_owned(),
-            SteckerAPIRoomType::Data(data_channel) => match data_channel {
-                DataRoomPublicType::Float => "FLOAT".to_owned(),
-                DataRoomPublicType::Chat => "CHAT".to_owned(),
-            },
-        }
-    }
-}
-
 impl APIClient {
     #[instrument(skip_all, err)]
-    pub async fn create_room(
+    pub async fn create_room<T: SteckerData>(
         &self,
         name: &str,
         password: Option<&str>,
-        room_type: &SteckerAPIRoomType,
         local_session_description: &str,
     ) -> anyhow::Result<CreateRoomResponse> {
-        let room_string: String = room_type.into();
+        let room_string: String = T::label();
 
         // @todo skip serialization of password if none, see https://serde.rs/field-attrs.html#skip_serializing_if
         let used_password = password.unwrap_or("");
 
         let query = json!({
             "query": r#"
-                mutation createRoom($name: String!, $offer: String!, $roomType: RoomType!, $password: String) {
-                    createRoom(name: $name, offer: $offer, roomType: $roomType, password: $password) {
-                        offer
-                        password
-                    }
+                mutation createRoom($name: String!, $offer: String!, $channelType: ChannelType!, $password: String) {
+                  createRoom(
+                    name: $name
+                    offer: $offer
+                    channelType: $channelType
+                    password: $password
+                  ) {
+                    password
+                    offer
+                  }
                 }
             "#,
             "variables": {
                 "name": name,
                 "offer": local_session_description,
-                "roomType": room_string,
+                "channelType": T::label(),
                 "password": used_password,
             }
         });
+        println!("JSON: {}", query);
 
         let client = reqwest::Client::new();
         let res = client
@@ -129,19 +118,20 @@ impl APIClient {
     }
 
     #[instrument(skip_all, err)]
-    pub async fn join_room(
+    pub async fn join_room<T: SteckerData>(
         &self,
         name: &str,
-        room_type: &SteckerAPIRoomType,
         local_session_description: &str,
     ) -> anyhow::Result<RTCSessionDescription> {
-        let room_string: String = room_type.into();
+        let room_string = T::label();
         let query = json!({
-            "query": "mutation joinRoom($name:String!, $offer:String!, $roomType:RoomType!) { joinRoom(name:$name, offer:$offer, roomType:$roomType) }",
+            "query": r#"mutation joinRoom($name: String!, $offer: String!, $channelType: ChannelType!) {
+                joinRoom(name: $name, offer: $offer, channelType: $channelType)
+            }"#,
             "variables": {
                 "name": name,
                 "offer": local_session_description,
-                "roomType": room_string,
+                "channelType": room_string,
             }
         });
 

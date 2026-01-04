@@ -1,4 +1,6 @@
+use std::f32::NAN;
 use std::str::FromStr;
+use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
 
@@ -6,16 +8,14 @@ use bytes::Bytes;
 use opus::{Channels as OpusChannels, Decoder as OpusDecoder, Encoder as OpusEncoder};
 use ringbuf::traits::{Consumer, Observer, Producer, Split};
 use ringbuf::{HeapCons, HeapProd, HeapRb};
-use shared::models::SteckerAPIRoomType;
+use shared::connections::ConnectionEvent;
+use shared::models::{RoomFloatData, SteckerDataChanelTrait, SteckerDataChannel};
 use tokio::runtime::Runtime;
 use tokio::sync::broadcast::{self, Receiver, Sender};
 
-use shared::{
-    api::APIClient,
-    connections::SteckerWebRTCConnection,
-    models::{DataRoomInternalType, SteckerData},
-};
-use tracing::{error, info, info_span, instrument, trace, Level};
+use shared::{api::APIClient, connections::SteckerWebRTCConnection, models::SteckerData};
+use tokio::sync::{mpsc, oneshot, watch, Notify};
+use tracing::{error, info, info_span, instrument, trace, Instrument, Level};
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::{self, filter, fmt};
@@ -26,7 +26,7 @@ fn setup_tracing() {
     let filter = filter::Targets::new()
         .with_default(Level::ERROR)
         .with_target("stecker_sc", Level::TRACE)
-        .with_target("shared", Level::INFO);
+        .with_target("shared", Level::TRACE);
 
     // @todo impl FormatEvent to prefix logs with STECKER:
     let formatter = fmt::layer().with_ansi(false).compact().without_time();
@@ -36,213 +36,172 @@ fn setup_tracing() {
     let _ = subscriber.try_init();
 }
 
-pub struct DataRoom {
-    name: String,
-    receiver: Receiver<f32>,
-    sender: Sender<f32>,
-    close_sender: Sender<()>,
-    // we need to remember the last value pulled
-    // from the queue
-    last_value: f32,
+pub struct DataRoomReceiver {
+    close_sender: Arc<Notify>,
+    value: watch::Receiver<f32>,
 }
 
-impl DataRoom {
-    pub fn join_room(name: &str, host: &str) -> Self {
-        setup_tracing();
-        let name2 = String::from_str(name).unwrap();
-        let host2 = host.to_owned();
+impl DataRoomReceiver {
+    #[instrument()]
+    pub fn join_room(name: String, host: String) -> Self {
+        trace!("Join room");
 
-        let span = info_span!("join_data_room", room_name = name2);
-        let span2 = span.clone();
-
-        let (sender, _) = broadcast::channel::<f32>(1024);
-        let sender2 = sender.clone();
-
-        let (close_sender, _) = broadcast::channel::<()>(1);
-        let mut sc_close_receiver = close_sender.subscribe();
+        let (value_setter, value_getter) = watch::channel::<f32>(0.0f32);
+        let close_sender = Arc::new(Notify::new());
+        let close_receiver = close_sender.clone();
 
         thread::spawn(move || {
-            let rt = Runtime::new().unwrap();
+            {
+            setup_tracing();
+            let rt = Runtime::new().expect("Could not spawn async runtime");
             rt.block_on(async {
-                let _guard = span.enter();
-                let connection = SteckerWebRTCConnection::build_connection().await.unwrap();
-                let stecker_data_channel = connection
-                    .create_data_channel(&DataRoomInternalType::Float)
-                    .await
-                    .unwrap();
-                let meta_data_channel = connection
-                    .create_data_channel(&DataRoomInternalType::Meta)
-                    .await
-                    .unwrap();
+                let (events, _) = broadcast::channel::<ConnectionEvent>(16);
+                let connection = SteckerWebRTCConnection::build_connection(events).await.expect("Could  not create peer connection");
+
+                let data_channel = Arc::new(SteckerDataChannel::<RoomFloatData>::create_channels());
+                let mut inbound_data = data_channel.inbound.subscribe();
+
+                let _ = connection.create_data_channel(data_channel).await;
                 let offer = connection.create_offer().await.unwrap();
 
-                let api_client = APIClient::new(host2);
+                let api_client = APIClient::new(host.to_string());
 
-                match api_client
-                    .join_room(
-                        &name2,
-                        &SteckerAPIRoomType::Data(shared::models::DataRoomPublicType::Float),
-                        &offer,
-                    )
-                    .await
-                {
+                match api_client.join_room::<RoomFloatData>(&name, &offer).await {
                     Ok(answer) => {
-                        let _guard = span2.enter();
                         connection.set_remote_description(answer).await.unwrap();
-
-                        let mut inbound_receiver = stecker_data_channel.inbound.clone().subscribe();
-                        let mut meta_receiver = meta_data_channel.inbound.clone().subscribe();
-                        let mut webrtc_close_receiver =
-                            stecker_data_channel.close.clone().subscribe();
-
                         loop {
                             tokio::select! {
-                                msg = inbound_receiver.recv() => {
-                                    if let Ok(SteckerData::F32(m)) = msg {
-                                        let _ = sender.send(m);
-                                    } else {
-                                        error!("Error on forwarding message to webrtc");
-                                    }
+                                msg = inbound_data.recv() => {
+                                    match msg {
+                                        Ok(data) => {
+                                            match value_setter.send(data) {
+                                                Ok(_) => {},
+                                                Err(err) => {
+                                                    error!(?err, "Failed to send WebRTC message");
+                                                    break;
+                                                },
+                                            }
+                                        },
+                                        Err(err) => {
+                                            error!(?err, "Failed to receive webrtc data messages");
+                                            break;
+                                        },
+                                    };
                                 },
-                                meta_msg = meta_receiver.recv() => {
-                                    if let Ok(SteckerData::String(m)) = meta_msg {
-                                        info!(message=m, "New meta message");
-                                    } else {
-                                        error!("Error on receiving meta message")
-                                    }
-                                }
-                                _ = webrtc_close_receiver.recv() => {
-                                    trace!("received webrtc close signal!");
+                                _ = connection.wait_for_disconnect() => {
+                                    info!("Server closed connection!");
                                     break
                                 }
-                                _ = sc_close_receiver.recv() => {
+                                _ = close_receiver.notified() => {
                                     trace!("Received supercollider close signal");
                                     break
                                 }
                             }
                         }
                         connection.close().await.unwrap();
-                        info!("Close connection now");
+                        trace!("Close connection");
                     }
                     Err(err) => {
                         error!(?err, "Failed to join room");
                     }
                 }
             });
+        }.in_current_span()
         });
-
-        let room = Self {
-            name: name.to_string(),
-            receiver: sender2.subscribe(),
-            sender: sender2,
-            last_value: -1.0,
+        Self {
             close_sender,
-        };
-
-        room
+            value: value_getter,
+        }
     }
+    pub fn get_value(&self) -> f32 {
+        *self.value.borrow()
+    }
+}
 
+struct DataRoomSender {
+    close_sender: Arc<Notify>,
+    value: watch::Sender<f32>,
+}
+
+impl DataRoomSender {
+    #[instrument]
     pub fn create_room(name: String, password: Option<String>, host: String) -> Self {
-        setup_tracing();
-        let name2 = name.to_string();
-        let span = info_span!("create_data_room", room_name = name);
-        let span2 = span.clone();
+        let (value_setter, mut value_getter) = watch::channel::<f32>(0.0f32);
+        let close_sender = Arc::new(Notify::new());
+        let close_sender2 = close_sender.clone();
+        let close_receiver = close_sender.clone();
 
-        let (sender, mut receiver) = broadcast::channel::<f32>(1024);
-        let sender2 = sender.clone();
-        let receiver2 = sender2.clone().subscribe();
-
-        let (close_sender, _) = broadcast::channel::<()>(1);
-        let mut sc_close_receiver = close_sender.subscribe();
-
+        // @todo add this to a queue so that we don't spawn a thread in the RT thread...
         thread::spawn(move || {
+            {
+            setup_tracing();
             let rt = Runtime::new().unwrap();
             rt.block_on(async {
-                let _guard = span.enter();
-                let connection = SteckerWebRTCConnection::build_connection().await?;
-                let stecker_data_channel = connection
-                    .create_data_channel(&DataRoomInternalType::Float)
-                    .await?;
-                let offer = connection.create_offer().await?;
-
-                tokio::spawn(async move {
-                    let _guard = span2.enter();
-                    let mut webrtc_close_receiver = stecker_data_channel.close.clone().subscribe();
-                    loop {
-                        tokio::select! {
-                            msg_result = receiver.recv() =>{
-                                match msg_result {
-                                    Ok(msg) => {
-                                        let _ = stecker_data_channel.outbound.send(SteckerData::F32(msg));
-                                    },
-                                    Err(err) => {
-                                        error!("Got an error while pushing messages out: {err}");
-                                        break
-                                    },
-                                }
-                            },
-                            _ = webrtc_close_receiver.recv() => {
-                                trace!("Received stop signal from webrtc on pushing values to WebRTC");
-                                break
-                            },
-                        };
-                    }
-                    info!("Stopped forwarding messages from SC to WebRTC");
-                });
+                let (events, _) = broadcast::channel::<ConnectionEvent>(32);
+                let connection = Arc::new(SteckerWebRTCConnection::build_connection(events).await.expect("Failed to create peer connection"));
+                let data_channel = Arc::new(SteckerDataChannel::<RoomFloatData>::create_channels());
+                let data_channel_outbound = data_channel.outbound.clone();
+                println!("About to create data channel");
+                connection.create_data_channel(data_channel).await.expect("Could not create data channel in peer connection");
+                println!("Created data channel");
+                let offer = connection.create_offer().await.expect("Could not create offer");
 
                 let api_client = APIClient::new(host.to_string());
 
-                match api_client.create_room(&name2, password.as_deref(), &shared::models::SteckerAPIRoomType::Data(shared::models::DataRoomPublicType::Float), &offer).await {
+                match api_client.create_room::<RoomFloatData>(&name, password.as_ref().map(|x| x.as_str()), &offer).await {
                     Ok(answer) => {
-                        connection.set_remote_description(answer.session_description).await?;
-                        info!(answer.password, "Received server response");
-
-                        // @todo wait for actual stop signal here
-                        let _ = sc_close_receiver.recv().await;
-
-                        trace!("Close connection now");
-                        connection.close().await?;
-                        Ok(())
+                        let _ = connection.set_remote_description(answer.session_description).await.expect("Could not set session description");
+                        trace!(password=answer.password, "Created data room on server");
                     }
-                    Err(err) => Err(err),
+                    Err(err) => {
+                        error!(?err, "Failed to create room on server, closing connection");
+                        close_sender.notify_one();
+                    },
                 }
+
+                loop {
+                    tokio::select! {
+                        received = value_getter.changed() =>{
+                            match received {
+                                Ok(_) => {
+                                    match data_channel_outbound.send(*value_getter.borrow_and_update()) {
+                                        Ok(_) => {}
+                                        Err(err) => {
+                                            error!(?err, "Could not send out message");
+                                        }
+                                    }
+                                },
+                                Err(_) => {
+                                    error!("Failed to receive value - terminating");
+                                    break
+                                },
+                            }
+                        },
+                        // this doesn't seem to work - why?
+                        // _ = connection.wait_for_disconnect() => {
+                        //     error!("Server closed connection");
+                        //     break
+                        // },
+                        _ = close_receiver.notified() => {
+                            trace!("Stop consuming");
+                            break
+                        }
+                    };
+                }
+                trace!("Stopped forwarding messages from SC to WebRTC");
+                let _ = connection.close().await;
             })
+        }.in_current_span()
         });
 
-        let room = Self {
-            name: name,
-            receiver: receiver2,
-            sender: sender2,
-            last_value: -1.0,
-            close_sender,
-        };
-
-        room
+        Self {
+            value: value_setter,
+            close_sender: close_sender2,
+        }
     }
 
-    pub fn recv_message(&mut self) -> f32 {
-        if !self.receiver.is_empty() {
-            // consume old messages from the queue
-            // so that there is only one message left
-            while self.receiver.len() > 1 {
-                let _ = self.receiver.try_recv();
-            }
-
-            match self.receiver.try_recv() {
-                Ok(msg) => {
-                    self.last_value = msg;
-                }
-                Err(err) => {
-                    error!(error=?err, "Got an error while receiving values");
-                }
-            }
-        };
-        self.last_value
-    }
-
-    pub fn send_message(&mut self, value: f32) -> f32 {
-        let _ = self.sender.send(value);
-        1.0
+    pub fn set_value(&self, value: f32) {
+        let _ = self.value.send(value);
     }
 }
 
@@ -276,6 +235,10 @@ impl AudioRoomSender {
 
         let (close_sender, _) = broadcast::channel::<()>(1);
         let mut sc_close_receiver = close_sender.subscribe();
+
+        todo!();
+
+        /*
 
         thread::spawn(move || {
             let rt = Runtime::new().unwrap();
@@ -383,6 +346,7 @@ impl AudioRoomSender {
             close_sender: close_sender,
             producer: producer,
         };
+         */
     }
 
     pub fn push_values_to_web(&mut self, values: &[f32]) {
@@ -414,6 +378,10 @@ impl AudioRoomReceiver {
 
         let (close_sender, _) = broadcast::channel::<()>(1);
         let mut sc_close_receiver = close_sender.subscribe();
+
+        todo!();
+
+        /*
 
         thread::spawn(move || {
             let rt = Runtime::new().unwrap();
@@ -499,6 +467,7 @@ impl AudioRoomReceiver {
             close_sender,
             consumer,
         }
+        */
     }
 
     pub fn pull_values_from_web(&mut self, values: &mut [f32]) -> () {
@@ -513,28 +482,44 @@ impl AudioRoomReceiver {
     }
 }
 
-fn create_data_room(name: &str, password: &str, host: &str) -> Box<DataRoom> {
-    Box::new(DataRoom::create_room(
+// data sender
+unsafe fn create_data_room(name: &str, password: &str, host: &str) -> *mut DataRoomSender {
+    // @todo to_string allocates on the RT thread!
+    Box::into_raw(Box::new(DataRoomSender::create_room(
         name.to_string(),
         Some(password.to_string()),
         host.to_string(),
-    ))
+    )))
 }
 
-fn join_data_room(name: &str, host: &str) -> Box<DataRoom> {
-    Box::new(DataRoom::join_room(name, host))
+unsafe fn send_data_message(data_room: *mut DataRoomSender, value: f32) {
+    unsafe { (*data_room).set_value(value) }
 }
 
-fn recv_data_message(data_room: &mut DataRoom) -> f32 {
-    data_room.recv_message()
+unsafe fn close_data_sender_room(room: *mut DataRoomSender) {
+    if (!room.is_null()) {
+        let room = unsafe { Box::from_raw(room) };
+        room.close_sender.notify_one();
+        // @todo defer this to a delete queue which gets consumed in its own thread
+        drop(room);
+    }
 }
 
-fn send_data_message(data_room: &mut DataRoom, value: f32) -> f32 {
-    data_room.send_message(value)
+// data receiver
+unsafe fn join_data_room(name: &str, host: &str) -> *mut DataRoomReceiver {
+    // @todo this allocates on the RT thread!
+    Box::into_raw(Box::new(DataRoomReceiver::join_room(
+        name.to_string(),
+        host.to_string(),
+    )))
 }
 
-fn send_data_close_signal(data_room: &mut DataRoom) {
-    let _ = data_room.close_sender.send(());
+unsafe fn recv_data_message(data_room: *mut DataRoomReceiver) -> f32 {
+    (*data_room).get_value()
+}
+
+unsafe fn close_data_receiver_room(data_room: *mut DataRoomReceiver) {
+    (*data_room).close_sender.notify_one();
 }
 
 fn create_audio_room_sender(name: &str, password: &str, host: &str) -> Box<AudioRoomSender> {
@@ -567,12 +552,15 @@ unsafe fn pull_values_from_web(
 #[cxx::bridge]
 mod ffi {
     extern "Rust" {
-        type DataRoom;
-        fn create_data_room(name: &str, password: &str, host: &str) -> Box<DataRoom>;
-        fn join_data_room(name: &str, host: &str) -> Box<DataRoom>;
-        fn recv_data_message(room: &mut DataRoom) -> f32;
-        fn send_data_message(room: &mut DataRoom, value: f32) -> f32;
-        fn send_data_close_signal(room: &mut DataRoom);
+        type DataRoomSender;
+        unsafe fn create_data_room(name: &str, password: &str, host: &str) -> *mut DataRoomSender;
+        unsafe fn send_data_message(room: *mut DataRoomSender, value: f32);
+        unsafe fn close_data_sender_room(room: *mut DataRoomSender);
+
+        type DataRoomReceiver;
+        unsafe fn join_data_room(name: &str, host: &str) -> *mut DataRoomReceiver;
+        unsafe fn recv_data_message(room: &mut DataRoomReceiver) -> f32;
+        unsafe fn close_data_receiver_room(room: *mut DataRoomReceiver);
 
         type AudioRoomSender;
         fn create_audio_room_sender(name: &str, password: &str, host: &str)

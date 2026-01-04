@@ -1,6 +1,7 @@
-use std::{fmt::Display, sync::Arc, time::Duration};
+use std::{fmt::Display, sync::Arc, thread::JoinHandle, time::Duration};
 
-use async_graphql::{Enum, InputObject, Object, SimpleObject};
+use anyhow::anyhow;
+use async_graphql::{Enum, Guard, InputObject, Object, SimpleObject};
 use futures::stream::{self, StreamExt};
 use rand::{
     distributions::{Alphanumeric, DistString},
@@ -8,17 +9,35 @@ use rand::{
 };
 use rand::{rngs::StdRng, seq::SliceRandom};
 use regex::Regex;
-use shared::connections::ConnectionEvent;
+use shared::{
+    connections::ConnectionEvent,
+    models::{
+        DataChannelEvent, RoomFloatData, RoomStringData, SteckerDataChanelTrait, SteckerDataChannel,
+    },
+};
 use shared::{
     connections::SteckerWebRTCConnection,
-    models::{DataRoomInternalType, SteckerAudioChannel, SteckerData},
+    models::{SteckerAudioChannel, SteckerData},
 };
-use tokio::sync::broadcast::Sender;
+use tokio::sync::broadcast::error::RecvError;
 use tokio::sync::RwLock;
+use tokio::{
+    sync::{
+        broadcast::{self, Sender},
+        mpsc, oneshot, watch, Mutex,
+    },
+    task,
+    time::sleep,
+};
+use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, instrument, trace, warn, Instrument, Span};
 use uuid::Uuid;
-use webrtc::track::track_local::track_local_static_rtp::TrackLocalStaticRTP;
 use webrtc::track::track_local::TrackLocalWriter;
+use webrtc::{
+    dtls::conn,
+    peer_connection::{self, peer_connection_state::RTCPeerConnectionState, RTCPeerConnection},
+    track::track_local::track_local_static_rtp::TrackLocalStaticRTP,
+};
 
 use crate::event_service::RoomEvent;
 
@@ -45,7 +64,12 @@ impl TryFrom<String> for DispatcherType {
 }
 
 impl DispatcherType {
-    pub async fn choose_room(&self, rooms: Vec<Arc<RwLock<BroadcastRoom>>>) -> Option<Room> {
+    pub async fn choose_room(
+        &self,
+        rooms: Vec<Arc<RwLock<BroadcastRoom>>>,
+    ) -> Option<BroadcastRoom> {
+        return None;
+        /*
         let mut empty_rooms: Vec<(String, Arc<RwLock<BroadcastRoom>>)> =
             stream::iter(rooms.clone())
                 .then(|room| async move {
@@ -85,19 +109,32 @@ impl DispatcherType {
                 }
             }
         }
+        */
     }
 }
 
+/// A dispatcher allows to select a room based on a given
+/// regular expression and a given dispatcher_type.
 #[derive(Clone)]
 pub struct RoomDispatcher {
+    /// name of the dispatcher - used for identification and must be unique
     pub name: String,
+    /// only people with the password can modify the dispatcher until it is deleted
+    /// or it is timed out.
     pub admin_password: String,
+    /// each room which matches this regex will be considered a candidate
     pub rule: Regex,
-    pub room_type: RoomType,
+    /// determines which dispatcher rule to apply on the filtered candidates
     pub dispatcher_type: DispatcherType,
     pub timeout_sender: tokio::sync::watch::Sender<Duration>,
     pub timeout_receiver: tokio::sync::watch::Receiver<Duration>,
+    /// if set, the stream website will also create an audio back channel
+    /// with the given prefix.
     pub return_room_prefix: Option<String>,
+    /// if true there will also be a random string added postfix to the name
+    /// of the back channel. this allows to have many people consuming an
+    /// channel via a dispatcher but still receive the back-channel
+    /// of each listener.
     pub add_random_postfix: bool,
 }
 
@@ -110,10 +147,6 @@ impl RoomDispatcher {
 
     async fn rule(&self) -> String {
         self.rule.as_str().to_string()
-    }
-
-    async fn room_type(&self) -> RoomType {
-        self.room_type
     }
 
     async fn dispatcher_type(&self) -> DispatcherType {
@@ -153,7 +186,6 @@ impl From<RoomDispatcherInput> for RoomDispatcher {
                 Alphanumeric.sample_string(&mut StdRng::from_entropy(), 8)
             },
             rule: Regex::new(&value.rule).unwrap(),
-            room_type: value.room_type,
             dispatcher_type: value.dispatcher_type,
             timeout_sender,
             timeout_receiver,
@@ -181,36 +213,416 @@ impl Display for RoomType {
     }
 }
 
-#[derive(Debug)]
-pub enum BroadcastRoom {
-    Data(DataBroadcastRoom),
-    Audio(AudioBroadcastRoom),
+// an abstraction for generic data channel creation
+#[derive(Clone, Copy, Debug, Enum, PartialEq, Eq)]
+pub enum DataChannelKind {
+    Float,
+    String,
 }
 
+pub trait ChannelAccess<T: SteckerData> {
+    fn get_field(
+        room: &BroadcastRoom,
+    ) -> Arc<tokio::sync::RwLock<Option<Arc<SteckerDataChannel<T>>>>>;
+}
+
+impl ChannelAccess<RoomFloatData> for DataChannelKind {
+    fn get_field(
+        room: &BroadcastRoom,
+    ) -> Arc<tokio::sync::RwLock<Option<Arc<SteckerDataChannel<RoomFloatData>>>>> {
+        room.float_channel.clone()
+    }
+}
+
+impl ChannelAccess<RoomStringData> for DataChannelKind {
+    fn get_field(
+        room: &BroadcastRoom,
+    ) -> Arc<tokio::sync::RwLock<Option<Arc<SteckerDataChannel<RoomStringData>>>>> {
+        room.chat_channel.clone()
+    }
+}
+
+#[derive(Debug)]
+pub struct BroadcastRoom {
+    audio_channel: Arc<RwLock<Option<Arc<SteckerAudioChannel>>>>,
+    float_channel: Arc<RwLock<Option<Arc<SteckerDataChannel<RoomFloatData>>>>>,
+    chat_channel: Arc<RwLock<Option<Arc<SteckerDataChannel<RoomStringData>>>>>,
+    /// if a stream gets taken over we must re-assign the audio_sequence_number b/c
+    /// otherwhise the stream will think it has stalled, which will result in silence
+    audio_sequence_offset: watch::Sender<u16>,
+
+    // all metadata for a room is stored in a dedicated such that it can be cloned for schema access
+    meta: BroadcastRoomMeta,
+
+    pub free_room: broadcast::Sender<()>,
+    active_channels: Arc<Mutex<u32>>,
+    current_deletion_token: Arc<Mutex<CancellationToken>>,
+    timeout: Duration,
+}
+
+type ResponseOffer = String;
+
 impl BroadcastRoom {
-    pub fn meta(&self) -> &BroadcastRoomMeta {
-        match self {
-            BroadcastRoom::Data(data_room) => &data_room.meta,
-            BroadcastRoom::Audio(audio_room) => &audio_room.meta,
+    pub fn new(name: String, password: String, uuid: Uuid, description: String) -> Self {
+        let (free_room, _) = broadcast::channel::<()>(1);
+        let (audio_sequence_offset, _) = watch::channel(0);
+        Self {
+            audio_channel: Arc::new(RwLock::new(None)),
+            float_channel: Arc::new(RwLock::new(None)),
+            chat_channel: Arc::new(RwLock::new(None)),
+            meta: BroadcastRoomMeta::new(name.clone(), uuid, password.clone(), description),
+            current_deletion_token: Arc::new(Mutex::new(CancellationToken::new())),
+            free_room,
+            active_channels: Arc::new(Mutex::new(0)),
+            timeout: Duration::from_secs(30),
+            audio_sequence_offset,
         }
     }
 
-    pub async fn join_room(&self, offer: &str) -> anyhow::Result<ResponseOffer> {
-        match self {
-            BroadcastRoom::Data(data_room) => data_room.join_room(offer).await,
-            BroadcastRoom::Audio(audio_room) => audio_room.join_room(offer).await,
+    pub async fn get_current_channel_types(&self) -> Vec<ChannelKind> {
+        let mut channels = vec![];
+        if self.audio_channel.read().await.is_some() {
+            channels.push(ChannelKind::AudioChannel);
         }
+        if self.chat_channel.read().await.is_some() {
+            channels.push(ChannelKind::DataChannel(DataChannelKind::String));
+        }
+        if self.float_channel.read().await.is_some() {
+            channels.push(ChannelKind::DataChannel(DataChannelKind::Float));
+        }
+        channels
+    }
+
+    pub fn meta(&self) -> &BroadcastRoomMeta {
+        &self.meta
     }
 
     /// replace sender of current broadcast
     pub async fn replace_sender(
         &self,
-        offer: &str,
-        password: &str,
+        kind: ChannelKind,
+        offer: String,
+        password: Option<String>,
     ) -> anyhow::Result<ResponseOffer> {
-        match self {
-            BroadcastRoom::Audio(audio_room) => audio_room.replace_sender(offer.to_string()).await,
-            BroadcastRoom::Data(data_broadcast_room) => todo!(),
+        // send out RoomEvent::BroadcastRoomUpdated(name.clone())
+        todo!()
+
+        // match &self.audio_channel.read().await {
+        //     Some(channel) => todo!(),
+        //     None => Err(anyhow::anyhow!("No audio room")),
+        // }
+        // match self {
+        //     BroadcastRoom::Audio(audio_room) => audio_room.replace_sender(offer.to_string()).await,
+        //     BroadcastRoom::Data(data_broadcast_room) => todo!(),
+        // }
+    }
+
+    // checks if a deletion is necessary - this can be cancelled
+    async fn check_deletion(
+        active_channels: Arc<Mutex<u32>>,
+        room_deletion_token: Arc<Mutex<CancellationToken>>,
+        room_timeout: Duration,
+        trigger_free_room: Sender<()>,
+    ) {
+        *active_channels.lock().await -= 1;
+
+        if (*active_channels.lock().await) > 0 {
+            return;
+        }
+
+        let new_cancellation_token = CancellationToken::new();
+        let cancel_token = new_cancellation_token.clone();
+        {
+            let mut active = room_deletion_token.lock().await;
+            *active = new_cancellation_token;
+        }
+
+        trace!(
+            ?room_timeout,
+            "Room will be freed if no new channel will be created"
+        );
+
+        tokio::select! {
+            _ = cancel_token.cancelled() => {
+                trace!("Room timeout got cancelled");
+            }
+            _ = sleep(room_timeout) => {
+                trace!("Room can be freed");
+                let _ = trigger_free_room.send(());
+            }
+        }
+    }
+
+    #[instrument(skip_all)]
+    pub async fn create_data_channel<T>(
+        &self,
+        offer: &String,
+        kind: DataChannelKind,
+    ) -> anyhow::Result<ResponseOffer>
+    where
+        T: SteckerData + 'static + Clone,
+        DataChannelKind: ChannelAccess<T>,
+    {
+        info!(?kind, "Creating data channel");
+        let (connection_events, _) = broadcast::channel(256);
+        let connection = Arc::new(
+            SteckerWebRTCConnection::build_connection(connection_events)
+                .in_current_span()
+                .await?,
+        );
+        let offer = connection.respond_to_offer(offer).await?;
+
+        let data_channel = Arc::new(SteckerDataChannel::<T>::create_channels());
+        let data_channel_clone = data_channel.clone();
+        let mut channel_events = data_channel.events.clone().subscribe();
+        let data_channel_handle = DataChannelKind::get_field(&self);
+        *data_channel_handle.write().await = Some(data_channel);
+
+        // an async callback to see if a float channel has been set and also release it afterwards
+        // let data_channel_handle = data_channel_handle;
+        let room_deletion_token = self.current_deletion_token.clone();
+        let trigger_free_room = self.free_room.clone();
+        let active_channels = self.active_channels.clone();
+        let room_timeout = self.timeout.clone();
+        tokio::spawn(async move {
+            // alternative: bump the duration on connection success
+            let mut active_timeout = true;
+            // @todo this can create a race condition b/c maybe in the meantime the room already got deleted?
+            // but if we trigger the cancellation earlier this can also lead to a dangling room while if e.g.
+            // build_connection fails.
+            room_deletion_token.lock().await.cancel();
+            *active_channels.lock().await += 1;
+            loop {
+                tokio::select! {
+                    rtc_connection = connection.wait_for_data_channel::<T>() => {
+                        debug!("Found matching data channel");
+                        let _ = data_channel_clone.connect(&rtc_connection).in_current_span().await;
+                        active_timeout = false;
+                    },
+                    _ = sleep(Duration::from_secs(20)) => {
+                        if active_timeout {
+                            info!("Time out - stop listening for connection");
+                            break;
+                        }
+                    },
+                    Ok(DataChannelEvent::ClosedConnection) = channel_events.recv() => break,
+                }
+            }
+            let _ = connection.close().await;
+            trace!("Release data channel");
+            *data_channel_handle.write().await = None;
+
+            let _ = Self::check_deletion(active_channels, room_deletion_token, room_timeout, trigger_free_room).await;
+        }.in_current_span());
+
+        Ok(offer)
+    }
+
+    #[instrument(skip(self, offer))]
+    pub async fn join_data_channel<T>(
+        &self,
+        offer: &String,
+        kind: DataChannelKind,
+    ) -> anyhow::Result<ResponseOffer>
+    where
+        T: SteckerData + 'static + Clone,
+        DataChannelKind: ChannelAccess<T>,
+    {
+        info!("Joining data channel");
+        let (connection_events, _) = broadcast::channel(256);
+        let connection = Arc::new(
+            SteckerWebRTCConnection::build_connection(connection_events)
+                .in_current_span()
+                .await?,
+        );
+        let offer = connection.respond_to_offer(offer).await?;
+
+        let client_data_channel = Arc::new(SteckerDataChannel::<T>::create_channels());
+
+        let data_channel_handle = DataChannelKind::get_field(&self);
+
+        let guard = data_channel_handle.read().await;
+        match &*guard {
+            Some(server_data_channel) => {
+                let mut server_channel_messages = server_data_channel.inbound.subscribe();
+                let mut server_channel_events = server_data_channel.events.subscribe();
+                let client_channel_messages = client_data_channel.outbound.clone();
+                let mut client_channel_events = client_data_channel.events.subscribe();
+
+                tokio::spawn(async move {
+                    let success_connection = tokio::select! {
+                        _ = sleep(Duration::from_secs(30)) => {
+                            trace!("Timed out!");
+                            false
+                        },
+                        rtc_connection = connection.wait_for_data_channel::<T>() => {
+                            let _ = client_data_channel.connect(&rtc_connection).await;
+                            true
+                        },
+                        _ = connection.wait_for_disconnect() => {
+                            trace!("Connection got closed while waiting for data channel");
+                            false
+                        }
+                    };
+
+                    if success_connection {
+                        loop {
+                            tokio::select! {
+                                Ok(inbound_message) = server_channel_messages.recv() => {
+                                    let _ = client_channel_messages.send(inbound_message);
+                                },
+                                Ok(DataChannelEvent::ClosedConnection) = server_channel_events.recv() => break,
+                                Ok(DataChannelEvent::ClosedConnection) = client_channel_events.recv() => break,
+                            }
+                        }
+                    }
+                    let _ = connection.close().await;
+                }.in_current_span());
+                Ok(offer)
+            }
+            None => Err(anyhow!("Could not find requested data channel")),
+        }
+    }
+
+    #[instrument(skip_all)]
+    pub async fn create_audio_channel(&self, offer: &String) -> anyhow::Result<ResponseOffer> {
+        info!("Creating audio channel");
+        let (connection_events, _) = broadcast::channel(256);
+        let connection = Arc::new(
+            SteckerWebRTCConnection::build_connection(connection_events)
+                .in_current_span()
+                .await?,
+        );
+        let offer = connection.respond_to_offer(offer).await?;
+
+        let audio_channel = Arc::new(SteckerAudioChannel::create_channels());
+        let audio_channel_clone = audio_channel.clone();
+        *self.audio_channel.write().await = Some(audio_channel);
+
+        // an async callback to see if a float channel has been set and also release it afterwards
+        // let data_channel_handle = data_channel_handle;
+        let room_deletion_token = self.current_deletion_token.clone();
+        let trigger_free_room = self.free_room.clone();
+        let active_channels = self.active_channels.clone();
+        let room_timeout = self.timeout.clone();
+        let audio_channel_handle = self.audio_channel.clone();
+        let audio_sequence_offset = self.audio_sequence_offset.clone();
+
+        tokio::spawn(
+            async move {
+                // @todo this can create a race condition b/c maybe in the meantime the room already got deleted?
+                // but if we trigger the cancellation earlier this can also lead to a dangling room while if e.g.
+                // build_connection fails.
+                room_deletion_token.lock().await.cancel();
+                *active_channels.lock().await += 1;
+                let audio_track_reply = tokio::select! {
+                    remote_track = connection.wait_for_audio_channel() => {
+                        debug!("Received audio channel from other side");
+                        Some(remote_track)
+                    },
+                    _ = sleep(Duration::from_secs(30)) => {
+                        info!("Other side failed to provide audio channel - stop listening.");
+                        None
+                    },
+                    _ = connection.wait_for_disconnect() => {
+                        info!("Disconnected while waiting for audio channel");
+                        None
+                    }
+                };
+
+                if let Some(audio_track) = audio_track_reply {
+                    let local_track = Arc::new(TrackLocalStaticRTP::new(
+                        audio_track.codec().capability,
+                        "audio".to_string(),
+                        "stecker".to_string(),
+                    ));
+                    let _ = audio_channel_clone
+                        .audio_channel_tx
+                        .send(Some(local_track.clone()));
+
+                    let offset = *audio_sequence_offset.borrow();
+                    loop {
+                        tokio::select! {
+                            Ok((mut rtp, _)) = audio_track.read_rtp() => {
+                                // we need to re-assign the seq number of each rtp packet
+                                // @todo also re-assign the timestamp - but this we assume for now that
+                                // ntp is working correctly...
+                                let mut seq_number = rtp.header.sequence_number;
+                                seq_number = seq_number.wrapping_add(offset);
+                                let _ = audio_sequence_offset.send(seq_number);
+                                rtp.header.sequence_number = seq_number;
+                                let _ = local_track.write_rtp(&rtp).await;
+                            },
+                            _ = connection.wait_for_disconnect() => break,
+                            else => {
+                                error!("Error while consuming audio track - bail out");
+                                break;
+                            }
+                        }
+                    }
+                }
+
+                let _ = connection.close().await;
+                trace!("Release audio channel");
+                *audio_channel_handle.write().await = None;
+
+                Self::check_deletion(
+                    active_channels,
+                    room_deletion_token,
+                    room_timeout,
+                    trigger_free_room,
+                )
+                .await;
+            }
+            .in_current_span(),
+        );
+
+        Ok(offer)
+    }
+
+    #[instrument(skip_all)]
+    pub async fn join_audio_channel(&self, offer: &String) -> anyhow::Result<ResponseOffer> {
+        info!("Joining audio channel");
+        let (connection_events, _) = broadcast::channel(256);
+        let connection = Arc::new(
+            SteckerWebRTCConnection::build_connection(connection_events)
+                .in_current_span()
+                .await?,
+        );
+        let offer = connection.respond_to_offer(offer).await?;
+
+        let c = connection.clone();
+        tokio::spawn(
+            async move {
+                let _ = c.clone().wait_for_disconnect().await;
+                let _ = c.close().await;
+            }
+            .in_current_span(),
+        );
+
+        // look up audio track opt - release the guard once we have cloned the ref
+        let audio_track_opt = {
+            let guard = self.audio_channel.read().await;
+            match &*guard {
+                Some(audio_channel) => {
+                    let watch = audio_channel.audio_channel_rx.borrow();
+                    watch.clone()
+                }
+                None => {
+                    anyhow::bail!("Could not find audio channel for room");
+                }
+            }
+        };
+
+        match audio_track_opt {
+            Some(audio_track) => {
+                connection.add_existing_audio_track(audio_track).await;
+                Ok(offer)
+            }
+            None => {
+                connection.close().await?;
+                Err(anyhow::anyhow!("Sender did not send audio track yet"))
+            }
         }
     }
 }
@@ -220,10 +632,10 @@ pub struct BroadcastRoomMeta {
     pub name: String,
     pub uuid: Uuid,
     pub admin_password: String,
+    pub description: String,
 
-    pub meta_reply: Sender<SteckerData>,
-    pub meta_broadcast: Sender<SteckerData>,
-
+    // pub meta_reply: Sender<SteckerData>,
+    // pub meta_broadcast: Sender<SteckerData>,
     pub num_listeners: tokio::sync::watch::Sender<i32>,
     // we need to keep the channel open, so we attach
     // a receiver to the "lifetime" of this struct.
@@ -233,491 +645,41 @@ pub struct BroadcastRoomMeta {
     pub room_events: Sender<RoomEvent>,
 }
 
-impl From<RoomType> for DataRoomInternalType {
-    fn from(value: RoomType) -> Self {
-        match value {
-            RoomType::Float => Self::Float,
-            RoomType::Chat => Self::Chat,
-            // @todo this is wrong!
-            RoomType::Audio => Self::Chat,
+impl BroadcastRoomMeta {
+    pub fn new(name: String, uuid: Uuid, password: String, description: String) -> Self {
+        let (num_listeners, _num_listeners_receiver) = watch::channel(0);
+        let (room_events, _) = broadcast::channel(16);
+        Self {
+            name,
+            uuid,
+            admin_password: password,
+            num_listeners,
+            _num_listeners_receiver,
+            room_events: room_events,
+            description,
         }
     }
 }
 
-#[derive(SimpleObject, Clone)]
-pub struct Room {
-    pub uuid: String,
-    pub name: String,
-    pub num_listeners: i32,
-    pub room_type: RoomType,
-}
-
-// server state objects
-#[derive(Debug)]
-pub struct DataBroadcastRoom {
-    pub meta: BroadcastRoomMeta,
-    /// Reply to server (messages not broadcasted)
-    /// potentially not interesting to subscribe to this
-    pub reply: Sender<SteckerData>,
-    /// Subscribe to this to receive messages from room
-    /// potentially not useful to send to this (unless you also become a broadcaster)
-    pub broadcast: Sender<SteckerData>,
-    pub room_type: DataRoomInternalType,
-}
-
-type ResponseOffer = String;
-
-pub struct BroadcastRoomWithOffer {
-    pub broadcast_room: DataBroadcastRoom,
-    pub offer: ResponseOffer,
-}
-
-impl DataBroadcastRoom {
-    #[instrument(skip_all, err)]
-    pub async fn create_room(
-        name: String,
-        offer: String,
-        room_type: DataRoomInternalType,
-        password: String,
-        room_events: Sender<RoomEvent>,
-    ) -> anyhow::Result<BroadcastRoomWithOffer> {
-        info!("Something else");
-        let connection = SteckerWebRTCConnection::build_connection()
-            .instrument(Span::current())
-            .await?;
-        let response_offer = connection
-            .respond_to_offer(offer)
-            .instrument(Span::current())
-            .await?;
-
-        let stecker_data_channel = connection.register_channel(&room_type);
-        let meta_channel = connection.register_channel(&DataRoomInternalType::Meta);
-
-        connection
-            .start_listening_for_data_channel()
-            .instrument(Span::current())
-            .await;
-
-        let (num_listeners_sender, num_listeners_receiver) = tokio::sync::watch::channel(0);
-
-        // thread for communication with creator
-        // value-messages from creator are already handled via data_channel
-        let mut num_listeners_receiver2 = num_listeners_receiver.clone();
-        let mut close_receiver = stecker_data_channel.close.subscribe();
-        let meta_outbound = meta_channel.outbound.clone();
-        let mut meta_inbound = meta_channel.inbound.subscribe();
-        let name2 = name.clone();
-        tokio::spawn(
-            async move {
-                loop {
-                    tokio::select! {
-                        _ = num_listeners_receiver2.changed() => {
-                            let cur_num_listeners = *num_listeners_receiver2.borrow();
-                            info!(cur_num_listeners, "Changed number of listeners");
-                            let _ = meta_outbound.send(SteckerData::String(
-                                format!("Number of listeners @ {name2}: {cur_num_listeners}")
-                            ));
-                        },
-                        raw_meta_msg = meta_inbound.recv() => {
-                            match raw_meta_msg {
-                                Ok(meta_msg) => {
-                                    match meta_msg {
-                                        SteckerData::String(msg) => {
-                                            trace!(msg, "Received meta_message form creator");
-                                        },
-                                        _ => {error!("Received f32 from meta message?!");}
-                                    }
-
-                                },
-                                Err(_) => {
-                                    error!("Could not receive meta message from creator");
-                                },
-                            }
-                        },
-                        _ = close_receiver.recv() => break,
-
-                    }
-                }
-            }
-            .instrument(Span::current()),
-        );
-
-        let broadcast_room = DataBroadcastRoom {
-            meta: BroadcastRoomMeta {
-                name: name,
-                uuid: Uuid::new_v4(),
-                meta_broadcast: meta_channel.inbound.clone(),
-                meta_reply: meta_channel.outbound.clone(),
-                num_listeners: num_listeners_sender,
-                _num_listeners_receiver: num_listeners_receiver,
-                admin_password: password,
-                room_events,
-            },
-            room_type: room_type,
-            reply: stecker_data_channel.outbound.clone(),
-            broadcast: stecker_data_channel.inbound.clone(),
-        };
-
-        Ok(BroadcastRoomWithOffer {
-            broadcast_room,
-            offer: response_offer,
-        })
-    }
-
-    #[instrument(skip_all, err)]
-    pub async fn join_room(&self, offer: &str) -> anyhow::Result<ResponseOffer> {
-        let connection = SteckerWebRTCConnection::build_connection().await?;
-        let response_offer = connection.respond_to_offer(offer.to_string()).await?;
-
-        let meta_channel = connection.register_channel(&DataRoomInternalType::Meta);
-        let stecker_data_channel = connection.register_channel(&self.room_type.into());
-        connection
-            .start_listening_for_data_channel()
-            .instrument(Span::current())
-            .await;
-
-        let room_rx = self.broadcast.clone();
-        let meta_rx = self.meta.meta_broadcast.clone();
-        let close_trigger2 = stecker_data_channel.close.clone();
-
-        let num_listeners2 = self.meta.num_listeners.clone();
-
-        // incrementing num listeners needs to borrow the value to avoid deadlock
-        let cur_num_listeners = *self.meta.num_listeners.borrow();
-        let _ = self.meta.num_listeners.send(cur_num_listeners + 1);
-        let mut num_listeners_receiver = self.meta.num_listeners.subscribe();
-
-        tokio::spawn(async move {
-            let mut room_receiver = room_rx.subscribe();
-            let mut meta_receiver = meta_rx.subscribe();
-            let mut stop_receiver = stecker_data_channel.close.subscribe();
-
-            // Listen to room messages and pass them to client
-            let mut inbound_receiver = stecker_data_channel.inbound.subscribe();
-            let mut meta_inbound_receiver = meta_channel.inbound.subscribe();
-            let mut stop_receiver2 = close_trigger2.subscribe();
-
-            loop {
-                tokio::select! {
-                    raw_msg = room_receiver.recv() => {
-                        match raw_msg {
-                            Ok(msg) => {
-                                let _ = stecker_data_channel.outbound.send(msg);
-                            },
-                            Err(err) => {
-                                while room_receiver.len() > 0 {
-                                    let _ = room_receiver.recv().await;
-                                }
-                                match err {
-                                    tokio::sync::broadcast::error::RecvError::Closed => error!("Channel is already closed"),
-                                    tokio::sync::broadcast::error::RecvError::Lagged(lag) => warn!(lag, "Lagging behind"),
-                                }
-                            },
-                        }
-                    },
-                    raw_msg = inbound_receiver.recv() => {
-                        match raw_msg {
-                            Ok(msg) => warn!(?msg, "Broadcasting message from subscriber will be ignored"),
-                            Err(_) => error!("Error while receiving inbound message"),
-                        }
-                    },
-                    raw_meta_msg = meta_receiver.recv() => {
-                        match raw_meta_msg {
-                            Ok(meta_msg) => {
-                                trace!(?meta_msg, "Send out meta message");
-                                let _ = meta_channel.outbound.send(meta_msg);
-                            },
-                            Err(_) => {error!("Failed to forward meta message")},
-                        }
-                    },
-                    raw_msg = meta_inbound_receiver.recv() => {
-                        match raw_msg {
-                            Ok(meta_msg) => warn!(?meta_msg, "Meta message from subscriber will be ignored"),
-                            Err(_) => error!("Error on receiving inbound meta message"),
-                        }
-                    },
-                    _ = num_listeners_receiver.changed() => {
-                        let cur_num_listeners = *num_listeners_receiver.borrow();
-                        info!(cur_num_listeners, "Number of listeners changed");
-                        let _ = meta_channel.outbound.send(SteckerData::String(format!("Number of listeners: {cur_num_listeners}").to_string()));
-                    },
-                    _ = stop_receiver2.recv() => {
-                        trace!("Stop consuming inbound messages now");
-                        break
-                    },
-                    _ = stop_receiver.recv() => {
-                        trace!("Received stop signal");
-                        break
-                    }
-                };
-            }
-            let cur_num_listeners = *num_listeners2.borrow();
-            let _ = num_listeners2.send(cur_num_listeners - 1);
-        }.instrument(Span::current()));
-        Ok(response_offer)
-    }
-}
-
-impl From<&BroadcastRoom> for Room {
-    fn from(value: &BroadcastRoom) -> Self {
-        let meta = value.meta();
-        let room_type = match value {
-            BroadcastRoom::Data(data_room) => data_room.room_type.into(),
-            BroadcastRoom::Audio(_) => RoomType::Audio,
-        };
-        Room {
-            uuid: meta.uuid.to_string(),
-            name: meta.name.clone(),
-            num_listeners: *meta.num_listeners.subscribe().borrow(),
-            room_type,
-        }
-    }
-}
-
-#[derive(Debug)]
-pub struct AudioBroadcastRoom {
-    pub meta: BroadcastRoomMeta,
-    pub stecker_audio_channel: SteckerAudioChannel,
-}
-
-pub struct AudioBroadcastRoomWithOffer {
-    pub audio_broadcast_room: AudioBroadcastRoom,
-    pub offer: String,
-    pub connection_events: Arc<Sender<ConnectionEvent>>,
-}
-
-impl AudioBroadcastRoom {
-    pub async fn create_room(
-        name: String,
-        offer: String,
-        admin_password: String,
-        room_events: Sender<RoomEvent>,
-    ) -> anyhow::Result<AudioBroadcastRoomWithOffer> {
-        let connection = SteckerWebRTCConnection::build_connection()
-            .in_current_span()
-            .await?;
-        // let audio_channel = connection.listen_for_audio_channel().await?;
-        let audio_channel = SteckerAudioChannel::create_channels();
-        let mut audio_track_receiver = connection
-            .listen_for_remote_audio_track()
-            .in_current_span()
-            .await;
-        let meta_channel = connection.register_channel(&DataRoomInternalType::Meta);
-        let (num_listeners_sender, num_listeners_receiver) = tokio::sync::watch::channel(0);
-        let response_offer = connection.respond_to_offer(offer).in_current_span().await?;
-
-        let audio_channel_tx = audio_channel.audio_channel_tx.clone();
-        let connection_events = connection.connection_events.clone();
-        let mut stop_consuming = audio_channel.reset_sender.subscribe();
-        let seq_number_sender = audio_channel.sequence_number_sender.clone();
-
-        // a thread which consumes the audio data we receive and pushes it to our internal
-        // webrtc channel which is then read/consumed and pushed to all our subscribers
-        let mut num_listeners_receiver2 = num_listeners_receiver.clone();
-        let room_events2 = room_events.clone();
-        let room_name2 = name.clone();
-        tokio::spawn(async move {
-                let track = audio_track_receiver.recv().await.unwrap();
-                let local_track = Arc::new(TrackLocalStaticRTP::new(
-                    track.codec().capability,
-                    "audio".to_owned(),
-                    "stecker".to_owned(),
-                ));
-
-                let _ = audio_channel_tx.send(Some(local_track.clone()));
-
-                loop {
-                    tokio::select! {
-                        result = track.read_rtp() => {
-                            if let Ok((rtp, _)) = result {
-                                let seq_number = rtp.header.sequence_number;
-                                let _ = seq_number_sender.send(seq_number);
-                                // trace!(seq_number, "Currently sending");
-                                let _ = local_track.write_rtp(&rtp).await;
-                            } else {
-                                error!("Failed to read track - stop consuming");
-                                break;
-                            }
-                       },
-                       num = num_listeners_receiver2.changed() => {
-                            if let Ok(_) = num {
-                                let _ = room_events2.send(RoomEvent::BroadcastRoomUserCount(room_name2.clone(), *num_listeners_receiver2.borrow()));
-                            }
-                       },
-                       _ = stop_consuming.recv() => {
-                            info!("Got signal to terminate consuming the current track");
-                            break;
-                       }
-                    }
-                }
-            }
-            .in_current_span(),
-        );
-
-        return Ok(AudioBroadcastRoomWithOffer {
-            offer: response_offer,
-            connection_events,
-            audio_broadcast_room: Self {
-                stecker_audio_channel: audio_channel,
-                meta: BroadcastRoomMeta {
-                    name: name,
-                    uuid: Uuid::new_v4(),
-                    meta_broadcast: meta_channel.inbound.clone(),
-                    meta_reply: meta_channel.outbound.clone(),
-                    num_listeners: num_listeners_sender,
-                    _num_listeners_receiver: num_listeners_receiver,
-                    admin_password,
-                    room_events,
-                },
-            },
-        });
-    }
-
-    #[instrument(skip_all)]
-    pub async fn join_room(&self, offer: &str) -> anyhow::Result<ResponseOffer> {
-        trace!("Join room");
-        let connection = SteckerWebRTCConnection::build_connection().await?;
-        let _meta_channel = connection.register_channel(&DataRoomInternalType::Meta);
-
-        let audio_track_receiver = self
-            .stecker_audio_channel
-            .audio_channel_tx
-            .subscribe()
-            .borrow()
-            .clone();
-
-        match audio_track_receiver {
-            Some(audio_track) => {
-                trace!("Found an audio track");
-                let _ = connection.add_existing_audio_track(audio_track).await;
-                let response_offer = connection.respond_to_offer(offer.to_owned()).await?;
-
-                let mut connection_events = connection.connection_events.subscribe();
-                let num_listeners = self.meta.num_listeners.clone();
-                tokio::spawn(async move {
-                    loop {
-                        match connection_events.recv().await {
-                            Ok(connection_event) => {
-                                match connection_event {
-                                    ConnectionEvent::NewICEConnectionState(ice_connection_state) => {
-                                        match ice_connection_state {
-                                            webrtc::ice_transport::ice_connection_state::RTCIceConnectionState::Connected => {
-                                                let new_num_listeners = *num_listeners.borrow() + 1;
-                                                let _ = num_listeners.send(new_num_listeners);
-                                            },
-                                            webrtc::ice_transport::ice_connection_state::RTCIceConnectionState::Completed | webrtc::ice_transport::ice_connection_state::RTCIceConnectionState::Disconnected => {
-                                                let new_num_listeners = *num_listeners.borrow() - 1;
-                                                let _ = num_listeners.send(new_num_listeners);
-                                                let _ = connection.close().await;
-                                                break
-                                            },
-                                            _ => {
-                                                trace!("Unknown connection state: {ice_connection_state}");
-                                            }
-                                        }
-                                    },
-                                    ConnectionEvent::NewPeerConnectionState(_rtcpeer_connection_state) => {},
-                                }
-                            },
-                            Err(err) => {
-                                error!(?err, "Receiving error");
-                                break;
-                            },
-                        }
-                    }
-                    trace!("Stop listening for connection events");
-                }.in_current_span());
-
-                Ok(response_offer)
-            }
-            None => Err(anyhow::anyhow!(
-                "Have not received an audio track from the sender yet - try later"
-            )),
-        }
-    }
-
-    pub async fn replace_sender(&self, offer: String) -> anyhow::Result<ResponseOffer> {
-        info!("Replace audio sender");
-        let connection = SteckerWebRTCConnection::build_connection()
-            .in_current_span()
-            .await?;
-        let response_offer = connection.respond_to_offer(offer).in_current_span().await?;
-        let mut audio_track_receiver = connection
-            .listen_for_remote_audio_track()
-            .in_current_span()
-            .await;
-
-        let local_track = if let Some(track) = self
-            .stecker_audio_channel
-            .audio_channel_tx
-            .subscribe()
-            .borrow()
-            .clone()
-        {
-            track
-        } else {
-            return Err(anyhow::anyhow!(
-                "Room has not been sucessfully set up, can not take it over."
-            ));
-        };
-
-        let _ = self.stecker_audio_channel.reset_sender.send(());
-
-        let mut stop_consuming = self.stecker_audio_channel.reset_sender.subscribe();
-        let seq_number_sender = self.stecker_audio_channel.sequence_number_sender.clone();
-        let mut seq_number_receiver = self.stecker_audio_channel.sequence_number_receiver.clone();
-        let _ = *seq_number_receiver.borrow_and_update();
-
-        tokio::spawn(
-            async move {
-                let track = audio_track_receiver.recv().await.unwrap();
-                let ssrc = track.ssrc();
-                trace!(ssrc, "Start consuming new audio track");
-
-                let mut last_seq: u16 = (*seq_number_receiver.borrow_and_update()).clone();
-
-                loop {
-                    tokio::select! {
-                        result = track.read_rtp() => {
-                            if let Ok((mut rtp, _)) = result {
-                                // we need to reorder RTP packages b/c otherwise the client will
-                                // think there was a package drop b/c of a gap in the seq order
-                                last_seq = last_seq.wrapping_add(1);
-                                rtp.header.sequence_number = last_seq;
-                                let _ = seq_number_sender.send(last_seq);
-                                let _ = local_track.write_rtp(&rtp).await;
-                            } else {
-                                error!("Failed to read track - stop consuming");
-                                break;
-                            }
-                       },
-                       _ = stop_consuming.recv() => {
-                            info!("Got signal to terminate consuming the current track");
-                            break;
-                        }
-                    }
-                }
-            }
-            .in_current_span(),
-        );
-
-        Ok(response_offer)
-    }
-}
-
-impl Into<RoomType> for DataRoomInternalType {
-    fn into(self) -> RoomType {
-        match self {
-            DataRoomInternalType::Float => RoomType::Float,
-            DataRoomInternalType::Chat => RoomType::Chat,
-            // @todo meta rooms do not exist exposed to the graphql api
-            DataRoomInternalType::Meta => !unimplemented!(),
-        }
-    }
-}
+// impl Into<RoomType> for DataRoomInternalType {
+//     fn into(self) -> RoomType {
+//         match self {
+//             DataRoomInternalType::Float => RoomType::Float,
+//             DataRoomInternalType::Chat => RoomType::Chat,
+//             // @todo meta rooms do not exist exposed to the graphql api
+//             DataRoomInternalType::Meta => !unimplemented!(),
+//         }
+//     }
+// }
 
 #[derive(SimpleObject, Clone)]
 pub struct RoomCreationReply {
     pub offer: String,
     pub password: String,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ChannelKind {
+    AudioChannel,
+    DataChannel(DataChannelKind),
 }

@@ -46,11 +46,11 @@ class SteckerConnection {
         this.peerConnection.addTransceiver('audio')
 
         this.peerConnection.ontrack = function (event) {
-        //   var el = document.getElementById(attachToHTMLPlayer);
-          Alpine.store("stecker").isPlaying = true;
-          htmlPlayer.srcObject = event.streams[0]
-          htmlPlayer.autoplay = true
-          htmlPlayer.controls = true
+            //   var el = document.getElementById(attachToHTMLPlayer);
+            Alpine.store("stecker").isPlaying = true;
+            htmlPlayer.srcObject = event.streams[0]
+            htmlPlayer.autoplay = true
+            htmlPlayer.controls = true
         }
     }
 
@@ -63,22 +63,22 @@ class SteckerConnection {
         return new Promise((resolve) => {
             that.peerConnection.oniceconnectionstatechange = (e) => console.log(`ICE connection state: ${that.peerConnection.iceConnectionState}`);
             that.peerConnection.onicecandidate = (event) => {
-              if (event.candidate === null) {
-                let localSessionDescription = btoa(
-                  JSON.stringify(that.peerConnection.localDescription)
-                );
-                that.localSessionDescription = localSessionDescription;
-                resolve(localSessionDescription);
-              }
+                if (event.candidate === null) {
+                    let localSessionDescription = btoa(
+                        JSON.stringify(that.peerConnection.localDescription)
+                    );
+                    that.localSessionDescription = localSessionDescription;
+                    resolve(localSessionDescription);
+                }
             };
 
             that.peerConnection
-            .createOffer()
-            .then((d) => {
-                that.peerConnection.setLocalDescription(d);
-                // resolve();
-            })
-            .catch((e) => console.log(`Some problems obtaining an offer: ${e}`));
+                .createOffer()
+                .then((d) => {
+                    that.peerConnection.setLocalDescription(d);
+                    // resolve();
+                })
+                .catch((e) => console.log(`Some problems obtaining an offer: ${e}`));
         });
     }
 }
@@ -86,7 +86,7 @@ class SteckerConnection {
 class SteckerDataChannel {
     /**
      * @param {SteckerConnection} steckerConnection
-     * @param {string} roomType - one of "float", "chat" or "meta"
+     * @param {string} roomType - one of "FLOAT", "CHAT" or "META"
      * @param {function(string|number): void} messageCallback - will be called if a message is received
      */
     constructor(steckerConnection, roomType, messageCallback) {
@@ -99,7 +99,7 @@ class SteckerDataChannel {
         this.channel.onopen = () => console.log(`${this.roomType}Channel has opened`);
         this.channel.onmessage = async (e) => {
             switch (this.roomType) {
-                case "float":
+                case "FLOAT":
                     let dataView = new DataView(await e.data.arrayBuffer());
                     let floatValue = dataView.getFloat32();
                     this.messageCallback(floatValue);
@@ -116,7 +116,7 @@ class SteckerDataChannel {
      */
     sendValue(value) {
         switch (this.roomType) {
-            case "float":
+            case "FLOAT":
                 console.log(`Send float ${value}`);
                 // Create an ArrayBuffer with a size in bytes
                 const buffer = new ArrayBuffer(4);
@@ -139,7 +139,10 @@ Alpine.store("stecker", {
     /**
      * @type {null | SteckerDataChannel}
      */
-    steckerDataChannel: null,
+    steckerMetaChannel: null,
+    steckerFloatChannel: null,
+    steckerChatChannel: null,
+
     steckerAudioChannelIn: null,
     steckerAudioChannelOut: null,
 
@@ -155,14 +158,14 @@ Alpine.store("stecker", {
     chatValue: "",
 
     isConnecting: false,
+    isConnected: false,
     isPlaying: false,
 
     /**
      *
-     * @param {string} roomType
      * @returns {void}
      */
-    async getRooms(roomType) {
+    async getRooms() {
         let results = await fetch(this.HOST, {
             method: "POST",
 
@@ -172,18 +175,19 @@ Alpine.store("stecker", {
 
             body: JSON.stringify({
                 query: `
-                    query getRooms($roomType: RoomType!) {
-                        rooms(roomType: $roomType) {
-                            uuid,
-                            name,
-                            numListeners,
-                            roomType,
-                        }
+                    query getRooms {
+                    rooms {
+                        name,
+                        uuid,
+                        numListeners,
+                        description,
+                        floatChannel,
+                        chatChannel,
+                        audioChannel
+                    }
                     }
                 `,
-                variables: {
-                    roomType: roomType.toUpperCase(),
-                }
+                variables: {},
             }),
         });
         if (!results.ok) {
@@ -197,38 +201,29 @@ Alpine.store("stecker", {
     /**
      *
      * @param {string} name
-     * @param {string} roomType
+     * @param {string | null} password
      * @returns {void}
      */
-    async createRoom(name, roomType) {
+    async createRoom(name, password) {
         let steckerConnection = new SteckerConnection();
 
         // we actually don't need to attach this to our alpine store
-        new SteckerDataChannel(steckerConnection, "meta", (msg) => {
+        this.steckerMetaChannel = new SteckerDataChannel(steckerConnection, "META", (msg) => {
             this.log(`META(${name}): ${msg}`);
         });
 
-        switch (roomType) {
-            case "float":
-                this.steckerDataChannel = new SteckerDataChannel(steckerConnection, "float", (msg) => {
-                    // @todo is this actually "this"?
-                    this.floatValue = msg;
-                });
-                this.allowSendFloat = true;
-                break;
-            case "chat":
-                this.steckerDataChannel = new SteckerDataChannel(steckerConnection, "chat", (msg) => {
-                    this.log(`CHAT: ${msg}`);
-                });
-                this.allowSendChat = true;
-                break;
-            case "audio":
-                await steckerConnection.createAudioChannel();
-                break;
-            default:
-                alert(`Unknown room type "${roomType}"`);
-                return;
-        }
+        this.steckerFloatChannel = new SteckerDataChannel(steckerConnection, "FLOAT", (msg) => {
+            // @todo is this actually "this"?
+            this.floatValue = msg;
+        });
+        this.allowSendFloat = true;
+
+        this.steckerChatChannel = new SteckerDataChannel(steckerConnection, "CHAT", (msg) => {
+            this.log(`CHAT: ${msg}`);
+        });
+        this.allowSendChat = true;
+
+        await steckerConnection.createAudioChannel();
 
         let localSessionDescription = await steckerConnection.generateLocalSessionDescription();
 
@@ -239,22 +234,24 @@ Alpine.store("stecker", {
             },
             body: JSON.stringify({
                 query: `
-                    mutation createRoom($name:String!, $offer:String!, $roomType: RoomType!) {
-                        createRoom(name:$name, offer: $offer, roomType: $roomType) {
-                            offer,
+                    mutation createRoom($name:String!, $offer:String!, $channelType:ChannelType!, $password:String, $description:String) {
+                        createRoom(name: $name, offer:$offer, channelType: $channelType, password:$password, description: $description) {
                             password,
+                            offer,
                         }
                     }
                 `,
                 variables: {
                     name: name,
                     offer: localSessionDescription,
-                    roomType: roomType.toUpperCase(),
+                    channelType: "AUDIO",  // todo fix this
+                    password: null,
+                    description: null,
                 },
             }),
         });
         if (!response.ok) {
-            alert(`Error during room creation: ${response.text()}`);
+            alert(`Error during room creation: ${await response.text()}`);
             return;
         }
         let jsonResponse = await response.json();
@@ -266,10 +263,11 @@ Alpine.store("stecker", {
 
         // put this into stecker connection class?
         let remoteSessionDescription = jsonResponse.data.createRoom.offer;
-        steckerConnection.peerConnection.setRemoteDescription(
+        await steckerConnection.peerConnection.setRemoteDescription(
             new RTCSessionDescription(JSON.parse(atob(remoteSessionDescription)))
         );
         this.createdRoom = true;
+        this.isConnected = true;
     },
 
     log(message) {
@@ -315,50 +313,47 @@ Alpine.store("stecker", {
     /**
      *
      * @param {string} name
-     * @param {string} roomType
+     * @param {Boolean} audioChannel
+     * @param {Boolean} floatChannel
+     * @param {Boolean} chatChannel
      * @param {string|null} returnRoomPrefix
      * @param {boolean} addRandomPostfix
      */
-    async joinRoom(name, roomType, returnRoomPrefix, addRandomPostfix) {
-        // @todo derived from graphQL, but in js we use lowercase
-        roomType = roomType.toLowerCase();
-
+    async joinRoom(name, audioChannel, floatChannel, chatChannel, returnRoomPrefix, addRandomPostfix) {
+        console.log(`Joining room: ${name}: audio ${audioChannel}, float: ${floatChannel}, chatChannel: ${chatChannel}`);
         if(returnRoomPrefix != null) {
             let randomString = addRandomPostfix ? (Math.random() + 1).toString(36).substring(7) : '';
             let returnRoomName = `${returnRoomPrefix}${name}${randomString}`;
             console.log(`Create return room ${returnRoomName}`);
-            this.createRoom(returnRoomName, roomType);
+            this.createRoom(returnRoomName, null);
         }
 
         let steckerConnection = new SteckerConnection();
 
-        new SteckerDataChannel(steckerConnection, "meta", (msg) => {
+        this.steckerMetaChannel = new SteckerDataChannel(steckerConnection, "meta", (msg) => {
             this.log(`META(${name}): ${msg}`);
         });
 
-        switch (roomType) {
-            case "float":
-                this.steckerDataChannel = new SteckerDataChannel(steckerConnection, "float", (msg) => {
-                    this.floatValue = msg;
-                });
-                break;
-            case "chat":
-                this.steckerDataChannel = new SteckerDataChannel(steckerConnection, "chat", (msg) => {
-                    this.log(`Chat(${name}): ${msg}`);
-                });
-                break;
-            case "audio":
-                if (this.steckerAudioChannelIn !== null) {
-                    this.steckerAudioChannelIn.close();
-                };
-                let htmlPlayer = document.getElementById("audio-player")
-                await steckerConnection.listenForAudioChannel(htmlPlayer);
-                this.steckerAudioChannelIn = steckerConnection;
-                break;
-            default:
-                alert(`Unknown room type ${roomType}`);
-                return;
-        }
+        if (audioChannel) {
+            if (this.steckerAudioChannelIn !== null) {
+                this.steckerAudioChannelIn.close();
+            };
+            let htmlPlayer = document.getElementById("audio-player")
+            await steckerConnection.listenForAudioChannel(htmlPlayer);
+            this.steckerAudioChannelIn = steckerConnection;
+        };
+
+        if(floatChannel) {
+            this.steckerFloatChannel = new SteckerDataChannel(steckerConnection, "FLOAT", (msg) => {
+                this.floatValue = msg;
+            });
+        };
+
+        if(chatChannel) {
+            this.steckerChatChannel = new SteckerDataChannel(steckerConnection, "CHAT", (msg) => {
+                this.log(`Chat(${name}): ${msg}`);
+            });
+        };
 
         let localDescription = await steckerConnection.generateLocalSessionDescription();
 
@@ -369,24 +364,25 @@ Alpine.store("stecker", {
             },
             body: JSON.stringify({
                 query: `
-                mutation joinRoom($name: String!, $offer:String!, $roomType: RoomType!) {
-                    joinRoom(name:$name, offer: $offer, roomType: $roomType)
+                mutation joinRoom($name: String!, $offer: String!, $channelType: ChannelType!) {
+                    joinRoom(name: $name, offer: $offer, channelType: $channelType)
                 }
                 `,
                 variables: {
                     name,
                     offer: localDescription,
-                    roomType: roomType.toUpperCase(),
+                    channelType: "AUDIO",
                 },
             }),
         });
         let rawResponse = await results.json();
         let remoteSessionDescription = rawResponse.data.joinRoom;
 
-        steckerConnection.peerConnection.setRemoteDescription(
+        await steckerConnection.peerConnection.setRemoteDescription(
             new RTCSessionDescription(JSON.parse(atob(remoteSessionDescription)))
         );
         this.connectedRoom = true;
+        this.isConnected = true;
     },
 });
 

@@ -6,13 +6,7 @@
 <h2>Rooms</h2>
 <div class="columns">
     <div class="column">
-        <span class="button room-button" @click="$store.stecker.getRooms('chat')">Load chat rooms</span>
-    </div>
-    <div class="column">
-        <span class="button room-button" @click="$store.stecker.getRooms('float')">Load float rooms</span>
-    </div>
-    <div class="column">
-        <span class="button room-button" @click="$store.stecker.getRooms('audio')">Load audio rooms</span>
+        <span class="button room-button" @click="$store.stecker.getRooms()">Load rooms</span>
     </div>
 </div>
 <div class="rooms">
@@ -21,6 +15,9 @@
             <tr>
                 <th>Name</th>
                 <th>UUID</th>
+                <th>Audio</th>
+                <th>Float</th>
+                <th>Chat</th>
                 <th># Listeners</th>
                 <th>Action</th>
             </tr>
@@ -30,8 +27,11 @@
                 <tr>
                     <th x-text="room.name"></th>
                     <th x-text="room.uuid"></th>
+                    <th x-text="room.audioChannel ? '✓' : '✗'"></th>
+                    <th x-text="room.floatChannel ? '✓' : '✗'"></th>
+                    <th x-text="room.chatChannel ? '✓' : '✗'"></th>
                     <th x-text="room.numListeners"></th>
-                    <th><button class="button" @click="$store.stecker.joinRoom(`${room.name}`, `${room.roomType}`)" x-bind:disabled="$store.stecker.connectedRoom">Join</button></th>
+                    <th><button class="button" @click="$store.stecker.joinRoom(`${room.name}`, room.audioChannel, room.floatChannel, room.chatChannel, null, false)" x-bind:disabled="$store.stecker.connectedRoom">Join</button></th>
                 </tr>
             </template>
         </tbody>
@@ -45,7 +45,7 @@
             <div class="field">
                 <label class="label">Room name</label>
                 <div class="control">
-                    <input class="input" x-model="roomName" x-bind:disabled="$store.stecker.steckerDataChannel !== null"></input>
+                    <input class="input" x-model="roomName" x-bind:disabled="$store.stecker.isConnected"></input>
                 </div>
             </div>
         </div>
@@ -54,11 +54,11 @@
                 <label class="label">Room type</label>
                 <div class="control">
                     <div class="select" style="width: 100%;">
-                        <select style="width: 100%;" required x-model="roomType" x-bind:disabled="$store.stecker.steckerDataChannel !== null">
+                        <select style="width: 100%;" required x-model="roomType" x-bind:disabled="$store.stecker.isConnected">
                             <option value="">Select...</option>
-                            <option value="float">Float</option>
-                            <option value="chat">Chat</option>
-                            <option value="audio">Audio</option>
+                            <option value="FLOAT">Float</option>
+                            <option value="CHAT">Chat</option>
+                            <option value="AUDIO">Audio</option>
                         </select>
                     </div>
                 </div>
@@ -70,7 +70,7 @@
         style="width: 100%;"
         class="button is-link"
         @click="$store.stecker.createRoom(roomName, roomType)"
-        x-bind:disabled="(roomName.length == 0) || (roomType == '') || $store.stecker.steckerDataChannel !== null"
+        x-bind:disabled="(roomName.length == 0) || (roomType == '') || $store.stecker.isConnected"
     >Create room</button>
 
     <br/>

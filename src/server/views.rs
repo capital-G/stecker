@@ -2,10 +2,11 @@ use std::sync::Arc;
 
 use axum::{
     extract::{Path, State},
+    http::StatusCode,
     response::{Html, IntoResponse, Redirect},
 };
 
-use crate::state::{AppState, RoomMapTrait};
+use crate::state::AppState;
 
 pub enum Template {
     Debug,
@@ -41,7 +42,9 @@ pub async fn stream_view(
     State(state): State<Arc<AppState>>,
     Path(room_name): Path<String>,
 ) -> Html<String> {
-    let room_guard = state.audio_rooms.map.read().await;
+    todo!();
+    /*
+    let room_guard = state.ge.map.read().await;
     let room_value = room_guard.get(&room_name);
 
     let room_name = match room_value {
@@ -63,12 +66,17 @@ pub async fn stream_view(
         .expect("Rendering of stream view failed");
 
     Html(rendered)
+     */
 }
 
 pub async fn dispatcher_view(
     State(state): State<Arc<AppState>>,
     Path(dispatcher_name): Path<String>,
 ) -> Result<impl axum::response::IntoResponse, axum::http::StatusCode> {
+    return Ok(Html("none"));
+    // Err::<T, axum::http::StatusCode>(StatusCode::BAD_GATEWAY)
+    // Err(StatusCode::BeAD_GATEWAY)
+    /*
     if let Some(dispatcher) = state.room_dispatchers.read().await.get(&dispatcher_name) {
         match dispatcher.room_type {
             crate::models::RoomType::Float => todo!(),
@@ -110,4 +118,5 @@ pub async fn dispatcher_view(
             .expect("Failed to render dispatcher not found template");
         Ok(Html(rendered).into_response())
     }
+     */
 }
