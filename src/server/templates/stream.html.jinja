@@ -34,7 +34,7 @@
         align-items: center;
     ">
         <button
-            @click="$store.stecker.joinRoom('{{ room_name }}', 'AUDIO', returnRoomPrefix, addRandomPostfix); clickedPlay=true;"
+            @click="$store.stecker.joinRoom('{{ room_name }}', true, false, false, returnRoomPrefix, addRandomPostfix); clickedPlay=true;"
             :style="{backgroundColor: borderColor()}"
             :disabled="clickedPlay"
             style="

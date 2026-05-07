@@ -46,11 +46,14 @@ class SteckerConnection {
         this.peerConnection.addTransceiver('audio')
 
         this.peerConnection.ontrack = function (event) {
-            //   var el = document.getElementById(attachToHTMLPlayer);
             Alpine.store("stecker").isPlaying = true;
-            htmlPlayer.srcObject = event.streams[0]
-            htmlPlayer.autoplay = true
-            htmlPlayer.controls = true
+            let stream = event.streams[0];
+            if (!stream) {
+                stream = new MediaStream([event.track]);
+            }
+            htmlPlayer.srcObject = stream;
+            htmlPlayer.autoplay = true;
+            htmlPlayer.controls = true;
         }
     }
 
@@ -199,31 +202,34 @@ Alpine.store("stecker", {
     },
 
     /**
-     *
      * @param {string} name
-     * @param {string | null} password
+     * @param {string} channelType - one of "AUDIO", "FLOAT", "STRING"
      * @returns {void}
      */
-    async createRoom(name, password) {
+    async createRoom(name, channelType) {
         let steckerConnection = new SteckerConnection();
 
-        // we actually don't need to attach this to our alpine store
-        this.steckerMetaChannel = new SteckerDataChannel(steckerConnection, "META", (msg) => {
+        this.steckerMetaChannel = new SteckerDataChannel(steckerConnection, "meta", (msg) => {
             this.log(`META(${name}): ${msg}`);
         });
 
-        this.steckerFloatChannel = new SteckerDataChannel(steckerConnection, "FLOAT", (msg) => {
-            // @todo is this actually "this"?
-            this.floatValue = msg;
-        });
-        this.allowSendFloat = true;
-
-        this.steckerChatChannel = new SteckerDataChannel(steckerConnection, "CHAT", (msg) => {
-            this.log(`CHAT: ${msg}`);
-        });
-        this.allowSendChat = true;
-
-        await steckerConnection.createAudioChannel();
+        switch (channelType) {
+            case "AUDIO":
+                await steckerConnection.createAudioChannel();
+                break;
+            case "FLOAT":
+                this.steckerFloatChannel = new SteckerDataChannel(steckerConnection, "FLOAT", (msg) => {
+                    this.floatValue = msg;
+                });
+                this.allowSendFloat = true;
+                break;
+            case "STRING":
+                this.steckerChatChannel = new SteckerDataChannel(steckerConnection, "STRING", (msg) => {
+                    this.log(`CHAT: ${msg}`);
+                });
+                this.allowSendChat = true;
+                break;
+        }
 
         let localSessionDescription = await steckerConnection.generateLocalSessionDescription();
 
@@ -244,7 +250,7 @@ Alpine.store("stecker", {
                 variables: {
                     name: name,
                     offer: localSessionDescription,
-                    channelType: "AUDIO",  // todo fix this
+                    channelType: channelType,
                     password: null,
                     description: null,
                 },
@@ -261,7 +267,6 @@ Alpine.store("stecker", {
             return;
         }
 
-        // put this into stecker connection class?
         let remoteSessionDescription = jsonResponse.data.createRoom.offer;
         await steckerConnection.peerConnection.setRemoteDescription(
             new RTCSessionDescription(JSON.parse(atob(remoteSessionDescription)))
@@ -275,11 +280,11 @@ Alpine.store("stecker", {
     },
 
     sendFloatValue() {
-        this.steckerDataChannel.sendValue(this.floatValue);
+        this.steckerFloatChannel.sendValue(this.floatValue);
     },
 
     sendChatValue() {
-        this.steckerDataChannel.sendValue(this.chatValue);
+        this.steckerChatChannel.sendValue(this.chatValue);
         this.chatValue = "";
     },
 
@@ -311,50 +316,11 @@ Alpine.store("stecker", {
     },
 
     /**
-     *
      * @param {string} name
-     * @param {Boolean} audioChannel
-     * @param {Boolean} floatChannel
-     * @param {Boolean} chatChannel
-     * @param {string|null} returnRoomPrefix
-     * @param {boolean} addRandomPostfix
+     * @param {string} channelType - "AUDIO", "FLOAT", or "STRING"
+     * @returns {Promise<void>}
      */
-    async joinRoom(name, audioChannel, floatChannel, chatChannel, returnRoomPrefix, addRandomPostfix) {
-        console.log(`Joining room: ${name}: audio ${audioChannel}, float: ${floatChannel}, chatChannel: ${chatChannel}`);
-        if(returnRoomPrefix != null) {
-            let randomString = addRandomPostfix ? (Math.random() + 1).toString(36).substring(7) : '';
-            let returnRoomName = `${returnRoomPrefix}${name}${randomString}`;
-            console.log(`Create return room ${returnRoomName}`);
-            this.createRoom(returnRoomName, null);
-        }
-
-        let steckerConnection = new SteckerConnection();
-
-        this.steckerMetaChannel = new SteckerDataChannel(steckerConnection, "meta", (msg) => {
-            this.log(`META(${name}): ${msg}`);
-        });
-
-        if (audioChannel) {
-            if (this.steckerAudioChannelIn !== null) {
-                this.steckerAudioChannelIn.close();
-            };
-            let htmlPlayer = document.getElementById("audio-player")
-            await steckerConnection.listenForAudioChannel(htmlPlayer);
-            this.steckerAudioChannelIn = steckerConnection;
-        };
-
-        if(floatChannel) {
-            this.steckerFloatChannel = new SteckerDataChannel(steckerConnection, "FLOAT", (msg) => {
-                this.floatValue = msg;
-            });
-        };
-
-        if(chatChannel) {
-            this.steckerChatChannel = new SteckerDataChannel(steckerConnection, "CHAT", (msg) => {
-                this.log(`Chat(${name}): ${msg}`);
-            });
-        };
-
+    async _sendJoinRoom(name, steckerConnection, channelType) {
         let localDescription = await steckerConnection.generateLocalSessionDescription();
 
         let results = await fetch(this.HOST, {
@@ -371,16 +337,70 @@ Alpine.store("stecker", {
                 variables: {
                     name,
                     offer: localDescription,
-                    channelType: "AUDIO",
+                    channelType,
                 },
             }),
         });
         let rawResponse = await results.json();
+        if (rawResponse.errors) {
+            console.error(`Error joining ${channelType} channel:`, rawResponse.errors);
+            return;
+        }
         let remoteSessionDescription = rawResponse.data.joinRoom;
 
         await steckerConnection.peerConnection.setRemoteDescription(
             new RTCSessionDescription(JSON.parse(atob(remoteSessionDescription)))
         );
+    },
+
+    /**
+     * @param {string} name
+     * @param {Boolean} audioChannel
+     * @param {Boolean} floatChannel
+     * @param {Boolean} chatChannel
+     * @param {string|null} returnRoomPrefix
+     * @param {boolean} addRandomPostfix
+     */
+    async joinRoom(name, audioChannel, floatChannel, chatChannel, returnRoomPrefix, addRandomPostfix) {
+        console.log(`Joining room: ${name}: audio ${audioChannel}, float: ${floatChannel}, chat: ${chatChannel}`);
+        if(returnRoomPrefix != null) {
+            let randomString = addRandomPostfix ? (Math.random() + 1).toString(36).substring(7) : '';
+            let returnRoomName = `${returnRoomPrefix}${name}${randomString}`;
+            console.log(`Create return room ${returnRoomName}`);
+            this.createRoom(returnRoomName, "AUDIO");
+        }
+
+        if (audioChannel) {
+            let steckerConnection = new SteckerConnection();
+            new SteckerDataChannel(steckerConnection, "meta", (msg) => {
+                this.log(`META(${name}): ${msg}`);
+            });
+
+            let htmlPlayer = document.getElementById("audio-player");
+            await steckerConnection.listenForAudioChannel(htmlPlayer);
+            this.steckerAudioChannelIn = steckerConnection;
+
+            await this._sendJoinRoom(name, steckerConnection, "AUDIO");
+        }
+
+        if (floatChannel) {
+            let steckerConnection = new SteckerConnection();
+            this.steckerFloatChannel = new SteckerDataChannel(steckerConnection, "FLOAT", (msg) => {
+                this.floatValue = msg;
+            });
+
+            await this._sendJoinRoom(name, steckerConnection, "FLOAT");
+        }
+
+        if (chatChannel) {
+            let steckerConnection = new SteckerConnection();
+            this.steckerChatChannel = new SteckerDataChannel(steckerConnection, "STRING", (msg) => {
+                this.log(`Chat(${name}): ${msg}`);
+            });
+
+            await this._sendJoinRoom(name, steckerConnection, "STRING");
+        }
+
         this.connectedRoom = true;
         this.isConnected = true;
     },
