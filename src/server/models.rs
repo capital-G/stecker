@@ -589,18 +589,7 @@ impl BroadcastRoom {
                 .in_current_span()
                 .await?,
         );
-        let offer = connection.respond_to_offer(offer).await?;
 
-        let c = connection.clone();
-        tokio::spawn(
-            async move {
-                let _ = c.clone().wait_for_disconnect().await;
-                let _ = c.close().await;
-            }
-            .in_current_span(),
-        );
-
-        // look up audio track opt - release the guard once we have cloned the ref
         let audio_track_opt = {
             let guard = self.audio_channel.read().await;
             match &*guard {
@@ -617,13 +606,25 @@ impl BroadcastRoom {
         match audio_track_opt {
             Some(audio_track) => {
                 connection.add_existing_audio_track(audio_track).await;
-                Ok(offer)
             }
             None => {
                 connection.close().await?;
-                Err(anyhow::anyhow!("Sender did not send audio track yet"))
+                return Err(anyhow::anyhow!("Sender did not send audio track yet"));
             }
         }
+
+        let offer = connection.respond_to_offer(offer).await?;
+
+        let c = connection.clone();
+        tokio::spawn(
+            async move {
+                let _ = c.clone().wait_for_disconnect().await;
+                let _ = c.close().await;
+            }
+            .in_current_span(),
+        );
+
+        Ok(offer)
     }
 }
 
