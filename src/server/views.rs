@@ -42,17 +42,9 @@ pub async fn stream_view(
     State(state): State<Arc<AppState>>,
     Path(room_name): Path<String>,
 ) -> Html<String> {
-    todo!();
-    /*
-    let room_guard = state.ge.map.read().await;
-    let room_value = room_guard.get(&room_name);
-
-    let room_name = match room_value {
-        Some(room) => {
-            let guard = room.read().await;
-            Some(guard.meta().name.clone())
-        }
-        None => None,
+    let room_name = {
+        let rooms_guard = state.rooms.read().await;
+        rooms_guard.get(&room_name).map(|_| room_name.clone())
     };
 
     let template = state
@@ -66,46 +58,33 @@ pub async fn stream_view(
         .expect("Rendering of stream view failed");
 
     Html(rendered)
-     */
 }
 
 pub async fn dispatcher_view(
     State(state): State<Arc<AppState>>,
     Path(dispatcher_name): Path<String>,
-) -> Result<impl axum::response::IntoResponse, axum::http::StatusCode> {
-    return Ok(Html("none"));
-    // Err::<T, axum::http::StatusCode>(StatusCode::BAD_GATEWAY)
-    // Err(StatusCode::BeAD_GATEWAY)
-    /*
+) -> Result<impl axum::response::IntoResponse, StatusCode> {
     if let Some(dispatcher) = state.room_dispatchers.read().await.get(&dispatcher_name) {
-        match dispatcher.room_type {
-            crate::models::RoomType::Float => todo!(),
-            crate::models::RoomType::Chat => todo!(),
-            crate::models::RoomType::Audio => {
-                let room_result = state.audio_rooms.get_room(dispatcher).await;
-                match room_result {
-                    Ok(room) => {
-                        // @todo how to make this type safe?
-                        let mut uri = format!("/s/{}?", room.name);
-                        if let Some(return_prefix) = dispatcher.return_room_prefix.clone() {
-                            uri.push_str(format!("&returnRoomPrefix={}", return_prefix).as_str());
-                        }
-                        if dispatcher.add_random_postfix {
-                            uri.push_str("&addRandomPostfix=1");
-                        }
-                        Ok(Redirect::to(&uri.as_str()).into_response())
-                    }
-                    Err(_) => {
-                        let template = state
-                            .jinja
-                            .get_template(Template::DispatcherNoRoomAvailable.as_str())
-                            .expect("Could not find dispatcher no room available template");
-                        let rendered = template
-                            .render(minijinja::context! {})
-                            .expect("Failed to render dispatcher no room available template");
-                        Ok(Html(rendered).into_response())
-                    }
+        match state.get_room(dispatcher).await {
+            Ok(room) => {
+                let mut uri = format!("/s/{}?", room.meta().name);
+                if let Some(return_prefix) = dispatcher.return_room_prefix.clone() {
+                    uri.push_str(format!("&returnRoomPrefix={}", return_prefix).as_str());
                 }
+                if dispatcher.add_random_postfix {
+                    uri.push_str("&addRandomPostfix=1");
+                }
+                Ok(Redirect::to(uri.as_str()).into_response())
+            }
+            Err(_) => {
+                let template = state
+                    .jinja
+                    .get_template(Template::DispatcherNoRoomAvailable.as_str())
+                    .expect("Could not find dispatcher no room available template");
+                let rendered = template
+                    .render(minijinja::context! {})
+                    .expect("Failed to render dispatcher no room available template");
+                Ok(Html(rendered).into_response())
             }
         }
     } else {
@@ -118,5 +97,4 @@ pub async fn dispatcher_view(
             .expect("Failed to render dispatcher not found template");
         Ok(Html(rendered).into_response())
     }
-     */
 }

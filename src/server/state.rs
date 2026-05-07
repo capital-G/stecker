@@ -141,7 +141,7 @@ impl AppState {
         Ok(room_dispatcher)
     }
 
-    async fn get_room(&self, dispatcher: &RoomDispatcher) -> anyhow::Result<BroadcastRoom> {
+    pub async fn get_room(&self, dispatcher: &RoomDispatcher) -> anyhow::Result<BroadcastRoom> {
         let rooms_guard = self.rooms.read().await;
 
         // is this the proper way to do this?
