@@ -79,6 +79,25 @@ impl SteckerData for RoomStringData {
     }
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct RoomAudioData;
+
+impl SteckerData for RoomAudioData {
+    type Payload = ();
+
+    fn label() -> String {
+        "AUDIO".to_string()
+    }
+
+    fn encode(_value: Self::Payload) -> anyhow::Result<Bytes> {
+        anyhow::bail!("Audio rooms do not use data channel encoding")
+    }
+
+    fn decode(_message: DataChannelMessage) -> anyhow::Result<Self::Payload> {
+        anyhow::bail!("Audio rooms do not use data channel decoding")
+    }
+}
+
 #[derive(Clone)]
 pub enum DataChannelEvent {
     OpenedConnection,
