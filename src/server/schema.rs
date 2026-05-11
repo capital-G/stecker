@@ -133,7 +133,13 @@ impl Mutation {
         state.insert_room(name.clone(), room).await;
 
         let response = match channel_kind {
-            ChannelKind::AudioChannel => room_clone.read().await.create_audio_channel(&offer).await,
+            ChannelKind::AudioChannel => {
+                room_clone
+                    .read()
+                    .await
+                    .create_audio_channel(&offer, state.room_events.clone())
+                    .await
+            }
             ChannelKind::DataChannel(kind) => match kind {
                 crate::models::DataChannelKind::Float => {
                     room_clone

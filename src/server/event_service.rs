@@ -3,6 +3,7 @@ use rosc::{OscMessage, OscPacket};
 #[derive(Debug, Clone)]
 pub enum RoomEvent {
     BroadcastRoomCreated(String),
+    BroadcastRoomStreaming(String),
     BroadcastRoomUpdated(String),
     BroadcastRoomUserCount(String, i32),
     BroadcastRoomDeleted(String),
@@ -17,6 +18,10 @@ impl RoomEvent {
         match self {
             RoomEvent::BroadcastRoomCreated(room_name) => OscPacket::Message(OscMessage {
                 addr: "/createdRoom".to_string(),
+                args: vec![rosc::OscType::String(room_name)],
+            }),
+            RoomEvent::BroadcastRoomStreaming(room_name) => OscPacket::Message(OscMessage {
+                addr: "/streamingRoom".to_string(),
                 args: vec![rosc::OscType::String(room_name)],
             }),
             RoomEvent::BroadcastRoomUpdated(room_name) => {

@@ -485,7 +485,11 @@ impl BroadcastRoom {
     }
 
     #[instrument(skip_all)]
-    pub async fn create_audio_channel(&self, offer: &String) -> anyhow::Result<ResponseOffer> {
+    pub async fn create_audio_channel(
+        &self,
+        offer: &String,
+        room_events: tokio::sync::broadcast::Sender<RoomEvent>,
+    ) -> anyhow::Result<ResponseOffer> {
         info!("Creating audio channel");
         let (connection_events, _) = broadcast::channel(256);
         let connection = Arc::new(
@@ -507,6 +511,7 @@ impl BroadcastRoom {
         let room_timeout = self.timeout.clone();
         let audio_channel_handle = self.audio_channel.clone();
         let audio_sequence_offset = self.audio_sequence_offset.clone();
+        let room_name = self.meta.name.clone();
 
         tokio::spawn(
             async move {
@@ -539,6 +544,7 @@ impl BroadcastRoom {
                     let _ = audio_channel_clone
                         .audio_channel_tx
                         .send(Some(local_track.clone()));
+                    let _ = room_events.send(RoomEvent::BroadcastRoomStreaming(room_name));
 
                     let offset = *audio_sequence_offset.borrow();
                     loop {
