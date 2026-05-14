@@ -21,8 +21,6 @@ use webrtc::peer_connection::sdp::session_description::RTCSessionDescription;
 use webrtc::peer_connection::signaling_state::RTCSignalingState;
 use webrtc::peer_connection::RTCPeerConnection;
 use webrtc::rtp_transceiver::rtp_codec::{RTCRtpCodecCapability, RTPCodecType};
-use webrtc::rtp_transceiver::rtp_transceiver_direction::RTCRtpTransceiverDirection;
-use webrtc::rtp_transceiver::RTCRtpTransceiverInit;
 use webrtc::track::track_local::track_local_static_rtp::TrackLocalStaticRTP;
 use webrtc::track::track_local::track_local_static_sample::TrackLocalStaticSample;
 use webrtc::track::track_remote::TrackRemote;
@@ -337,13 +335,7 @@ impl SteckerWebRTCConnection {
     pub async fn add_recvonly_audio_transceiver(&self) -> anyhow::Result<()> {
         trace!("Add recvonly audio transceiver");
         self.peer_connection
-            .add_transceiver_from_kind(
-                RTPCodecType::Audio,
-                Some(RTCRtpTransceiverInit {
-                    direction: RTCRtpTransceiverDirection::Recvonly,
-                    send_encodings: vec![],
-                }),
-            )
+            .add_transceiver_from_kind(RTPCodecType::Audio, None)
             .await?;
         Ok(())
     }
