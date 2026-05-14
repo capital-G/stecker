@@ -67,9 +67,7 @@ impl DispatcherType {
     pub async fn choose_room(
         &self,
         rooms: Vec<Arc<RwLock<BroadcastRoom>>>,
-    ) -> Option<BroadcastRoom> {
-        return None;
-        /*
+    ) -> Option<Arc<RwLock<BroadcastRoom>>> {
         let mut empty_rooms: Vec<(String, Arc<RwLock<BroadcastRoom>>)> =
             stream::iter(rooms.clone())
                 .then(|room| async move {
@@ -87,29 +85,15 @@ impl DispatcherType {
                 .await;
 
         match self {
-            DispatcherType::Random => {
-                if let Some(room) = rooms.choose(&mut StdRng::from_entropy()) {
-                    let room_lock = room.read().await;
-                    return Some((&*room_lock).into());
-                } else {
-                    None
-                }
-            }
+            DispatcherType::Random => rooms.choose(&mut StdRng::from_entropy()).cloned(),
             DispatcherType::NextFreeAlphabetical => {
                 empty_rooms.sort_by(|a, b| a.0.cmp(&b.0));
-                match empty_rooms.first() {
-                    Some((_, room)) => Some((&*room.read().await).into()),
-                    None => None,
-                }
+                empty_rooms.first().map(|(_, room)| room.clone())
             }
-            DispatcherType::NextFreeRandom => {
-                match empty_rooms.choose(&mut StdRng::from_entropy()) {
-                    Some((_, room)) => Some((&*room.read().await).into()),
-                    None => None,
-                }
-            }
+            DispatcherType::NextFreeRandom => empty_rooms
+                .choose(&mut StdRng::from_entropy())
+                .map(|(_, room)| room.clone()),
         }
-        */
     }
 }
 

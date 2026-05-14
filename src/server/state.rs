@@ -145,10 +145,12 @@ impl AppState {
         Ok(room_dispatcher)
     }
 
-    pub async fn get_room(&self, dispatcher: &RoomDispatcher) -> anyhow::Result<BroadcastRoom> {
+    pub async fn get_room(
+        &self,
+        dispatcher: &RoomDispatcher,
+    ) -> anyhow::Result<Arc<RwLock<BroadcastRoom>>> {
         let rooms_guard = self.rooms.read().await;
 
-        // is this the proper way to do this?
         let matched_rooms: Vec<_> = stream::iter(rooms_guard.values())
             .filter_map(|room| async {
                 let room_guard = room.read().await;
