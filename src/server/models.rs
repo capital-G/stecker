@@ -356,14 +356,17 @@ impl BroadcastRoom {
                 };
 
                 if let Some(audio_track) = audio_track_reply {
-                    let local_track = Arc::new(TrackLocalStaticRTP::new(
-                        audio_track.codec().capability,
-                        "audio".to_string(),
-                        "stecker".to_string(),
-                    ));
-                    let _ = audio_channel
-                        .audio_channel_tx
-                        .send(Some(local_track.clone()));
+                    let local_track = {
+                        let existing = audio_channel.audio_channel_rx.borrow();
+                        match &*existing {
+                            Some(track) => track.clone(),
+                            None => Arc::new(TrackLocalStaticRTP::new(
+                                audio_track.codec().capability,
+                                "audio".to_string(),
+                                "stecker".to_string(),
+                            )),
+                        }
+                    };
                     let _ = room_events.send(RoomEvent::BroadcastRoomUpdated(room_name));
 
                     let mut reset_rx = audio_channel.reset_sender.subscribe();
