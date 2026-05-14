@@ -110,9 +110,13 @@ impl Mutation {
                 offer: existing_room
                     .read()
                     .await
-                    .replace_sender(channel_kind, offer, password.clone())
+                    .replace_sender(
+                        channel_kind,
+                        offer,
+                        password.clone(),
+                        state.room_events.clone(),
+                    )
                     .await?,
-                // password can not be empty, but we will fail earlier if password does not match
                 password: password.unwrap_or("".to_string()),
             });
         }

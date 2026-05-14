@@ -303,18 +303,124 @@ impl BroadcastRoom {
         kind: ChannelKind,
         offer: String,
         password: Option<String>,
+        room_events: tokio::sync::broadcast::Sender<RoomEvent>,
     ) -> anyhow::Result<ResponseOffer> {
-        // send out RoomEvent::BroadcastRoomUpdated(name.clone())
-        todo!()
+        match password {
+            Some(ref pw) if pw == &self.meta.admin_password => {}
+            Some(_) => return Err(anyhow!("Invalid password")),
+            None => return Err(anyhow!("Password required to replace sender")),
+        }
 
-        // match &self.audio_channel.read().await {
-        //     Some(channel) => todo!(),
-        //     None => Err(anyhow::anyhow!("No audio room")),
-        // }
-        // match self {
-        //     BroadcastRoom::Audio(audio_room) => audio_room.replace_sender(offer.to_string()).await,
-        //     BroadcastRoom::Data(data_broadcast_room) => todo!(),
-        // }
+        match kind {
+            ChannelKind::AudioChannel => self.replace_audio_sender(offer, room_events).await,
+            ChannelKind::DataChannel(_) => Err(anyhow!(
+                "Replacing data channel senders is not yet supported"
+            )),
+        }
+    }
+
+    #[instrument(skip_all)]
+    async fn replace_audio_sender(
+        &self,
+        offer: String,
+        room_events: tokio::sync::broadcast::Sender<RoomEvent>,
+    ) -> anyhow::Result<ResponseOffer> {
+        let audio_channel = {
+            let guard = self.audio_channel.read().await;
+            match &*guard {
+                Some(channel) => channel.clone(),
+                None => return Err(anyhow!("No audio channel to replace")),
+            }
+        };
+
+        let _ = audio_channel.reset_sender.send(());
+
+        let (connection_events, _) = broadcast::channel(256);
+        let connection = Arc::new(
+            SteckerWebRTCConnection::build_connection(connection_events)
+                .in_current_span()
+                .await?,
+        );
+        let offer = connection.respond_to_offer(&offer).await?;
+
+        let audio_sequence_offset = self.audio_sequence_offset.clone();
+        let room_name = self.meta.name.clone();
+        let audio_channel_handle = self.audio_channel.clone();
+        let room_deletion_token = self.current_deletion_token.clone();
+        let trigger_free_room = self.free_room.clone();
+        let active_channels = self.active_channels.clone();
+        let room_timeout = self.timeout;
+
+        tokio::spawn(
+            async move {
+                room_deletion_token.lock().await.cancel();
+                *active_channels.lock().await += 1;
+
+                let audio_track_reply = tokio::select! {
+                    remote_track = connection.wait_for_audio_channel() => {
+                        debug!("Received replacement audio channel");
+                        Some(remote_track)
+                    },
+                    _ = sleep(Duration::from_secs(30)) => {
+                        info!("Replacement sender timed out");
+                        None
+                    },
+                    _ = connection.wait_for_disconnect() => {
+                        info!("Replacement sender disconnected before providing audio");
+                        None
+                    }
+                };
+
+                if let Some(audio_track) = audio_track_reply {
+                    let local_track = Arc::new(TrackLocalStaticRTP::new(
+                        audio_track.codec().capability,
+                        "audio".to_string(),
+                        "stecker".to_string(),
+                    ));
+                    let _ = audio_channel
+                        .audio_channel_tx
+                        .send(Some(local_track.clone()));
+                    let _ = room_events.send(RoomEvent::BroadcastRoomUpdated(room_name));
+
+                    let mut reset_rx = audio_channel.reset_sender.subscribe();
+                    let offset = *audio_sequence_offset.borrow();
+                    loop {
+                        tokio::select! {
+                            Ok((mut rtp, _)) = audio_track.read_rtp() => {
+                                let mut seq_number = rtp.header.sequence_number;
+                                seq_number = seq_number.wrapping_add(offset);
+                                let _ = audio_sequence_offset.send(seq_number);
+                                rtp.header.sequence_number = seq_number;
+                                let _ = local_track.write_rtp(&rtp).await;
+                            },
+                            _ = connection.wait_for_disconnect() => break,
+                            _ = reset_rx.recv() => {
+                                info!("Sender replaced again");
+                                let _ = connection.close().await;
+                                *active_channels.lock().await -= 1;
+                                return;
+                            }
+                            else => break,
+                        }
+                    }
+                }
+
+                let _ = connection.close().await;
+                trace!("Release audio channel");
+                *audio_channel_handle.write().await = None;
+
+                Self::check_deletion(
+                    active_channels,
+                    room_deletion_token,
+                    room_timeout,
+                    trigger_free_room,
+                )
+                .await;
+            }
+            .in_current_span(),
+        );
+
+        Ok(offer)
     }
 
     // checks if a deletion is necessary - this can be cancelled
@@ -515,11 +621,11 @@ impl BroadcastRoom {
 
         tokio::spawn(
             async move {
-                // @todo this can create a race condition b/c maybe in the meantime the room already got deleted?
-                // but if we trigger the cancellation earlier this can also lead to a dangling room while if e.g.
-                // build_connection fails.
                 room_deletion_token.lock().await.cancel();
                 *active_channels.lock().await += 1;
+                let mut reset_rx = audio_channel_clone.reset_sender.subscribe();
+                let mut replaced = false;
+
                 let audio_track_reply = tokio::select! {
                     remote_track = connection.wait_for_audio_channel() => {
                         debug!("Received audio channel from other side");
@@ -550,9 +656,6 @@ impl BroadcastRoom {
                     loop {
                         tokio::select! {
                             Ok((mut rtp, _)) = audio_track.read_rtp() => {
-                                // we need to re-assign the seq number of each rtp packet
-                                // @todo also re-assign the timestamp - but this we assume for now that
-                                // ntp is working correctly...
                                 let mut seq_number = rtp.header.sequence_number;
                                 seq_number = seq_number.wrapping_add(offset);
                                 let _ = audio_sequence_offset.send(seq_number);
@@ -560,6 +663,11 @@ impl BroadcastRoom {
                                 let _ = local_track.write_rtp(&rtp).await;
                             },
                             _ = connection.wait_for_disconnect() => break,
+                            _ = reset_rx.recv() => {
+                                info!("Sender replaced");
+                                replaced = true;
+                                break;
+                            }
                             else => {
                                 error!("Error while consuming audio track - bail out");
                                 break;
@@ -569,16 +677,21 @@ impl BroadcastRoom {
                 }
 
                 let _ = connection.close().await;
-                trace!("Release audio channel");
-                *audio_channel_handle.write().await = None;
 
-                Self::check_deletion(
-                    active_channels,
-                    room_deletion_token,
-                    room_timeout,
-                    trigger_free_room,
-                )
-                .await;
+                if replaced {
+                    *active_channels.lock().await -= 1;
+                } else {
+                    trace!("Release audio channel");
+                    *audio_channel_handle.write().await = None;
+
+                    Self::check_deletion(
+                        active_channels,
+                        room_deletion_token,
+                        room_timeout,
+                        trigger_free_room,
+                    )
+                    .await;
+                }
             }
             .in_current_span(),
         );
