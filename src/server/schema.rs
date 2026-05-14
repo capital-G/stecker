@@ -1,4 +1,4 @@
-use std::{os::macos::raw::stat, sync::Arc, time::Duration};
+use std::{sync::Arc, time::Duration};
 
 use crate::{
     event_service::RoomEvent,
