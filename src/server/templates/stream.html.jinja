@@ -2,69 +2,122 @@
 
 {% block content %}
 
-<div x-data="{
-        returnRoomPrefix: new URLSearchParams(location.search).get('returnRoomPrefix'),
-        addRandomPostfix: parseInt(new URLSearchParams(location.search).get('addRandomPostfix')) >= 1,
-        volume: 80,
-        borderColor() {return $store.stecker.isPlaying ? 'greenyellow' : 'orange'},
-        clickedPlay: false,
+<style>
+    body, .content.container { background: #1a1a2e; margin: 0; padding: 0; }
+    .stream-page {
+        display: flex; flex-direction: column; align-items: center;
+        justify-content: center; height: 100vh; max-width: 600px;
+        margin: auto; background: #1a1a2e; color: #c8c8d0;
+        font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+        padding: 1.5rem; box-sizing: border-box;
     }
-    "
-    style="
-    display:flex;
-    flex-direction: column;
-    align-items:center;
-    height: 100vh;
-    max-width:600px;
-    margin:auto;
-">
+    .stream-page .room-name {
+        font-size: clamp(1.5rem, 6vw, 2.5rem); color: #7fcc4a;
+        margin: 0 0 2rem; letter-spacing: 0.05em;
+    }
+    .stream-page canvas { border-radius: 50%; margin-bottom: 1.5rem; }
+    .stream-page .status {
+        font-size: 0.8rem; color: #888; margin-bottom: 1.5rem;
+        text-align: center; line-height: 1.6;
+    }
+    .stream-page .status .live { color: #7fcc4a; }
+    .stream-page .status .warn { color: #e8a735; }
+    .stream-page .play-btn {
+        width: 56px; height: 56px; border-radius: 50%; border: 2px solid #444;
+        background: transparent; color: #c8c8d0; font-size: 1.2rem;
+        cursor: pointer; transition: border-color 0.3s, color 0.3s;
+        display: flex; align-items: center; justify-content: center;
+        margin-bottom: 1.5rem;
+    }
+    .stream-page .play-btn:hover { border-color: #7fcc4a; color: #7fcc4a; }
+    .stream-page .play-btn:disabled { border-color: #7fcc4a; color: #7fcc4a; cursor: default; }
+    .stream-page input[type=range] {
+        -webkit-appearance: none; appearance: none; width: min(80%, 280px);
+        height: 3px; background: #333; outline: none; border-radius: 2px;
+    }
+    .stream-page input[type=range]::-webkit-slider-thumb {
+        -webkit-appearance: none; width: 14px; height: 14px;
+        border-radius: 50%; background: #7fcc4a; cursor: pointer;
+    }
+    .stream-page input[type=range]::-moz-range-thumb {
+        width: 14px; height: 14px; border: none;
+        border-radius: 50%; background: #7fcc4a; cursor: pointer;
+    }
+    .stream-page .unavailable { color: #e8a735; font-size: clamp(1.2rem, 5vw, 2rem); }
+</style>
+
+<div class="stream-page" x-data="{
+    returnRoomPrefix: new URLSearchParams(location.search).get('returnRoomPrefix'),
+    addRandomPostfix: parseInt(new URLSearchParams(location.search).get('addRandomPostfix')) >= 1,
+    volume: 80,
+    clickedPlay: false,
+    play() {
+        $store.stecker.joinRoom('{{ room_name }}', true, false, false, this.returnRoomPrefix, this.addRandomPostfix);
+        this.clickedPlay = true;
+        let self = this;
+        let w = setInterval(() => {
+            let a = document.getElementById('audio-player');
+            if (a && a.srcObject) { clearInterval(w); self.startViz(); }
+        }, 200);
+    },
+    startViz() {
+        let audio = document.getElementById('audio-player');
+        let canvas = document.getElementById('viz');
+        if (!audio.srcObject || !canvas) return;
+        let ctx = new AudioContext();
+        let src = ctx.createMediaStreamSource(audio.srcObject);
+        let an = ctx.createAnalyser();
+        an.fftSize = 128;
+        src.connect(an);
+        let c = canvas.getContext('2d');
+        let draw = () => {
+            let data = new Uint8Array(an.frequencyBinCount);
+            an.getByteFrequencyData(data);
+            let s = canvas.width, half = s / 2, r = s * 0.3;
+            c.clearRect(0, 0, s, s);
+            let bars = 32, step = Math.floor(data.length / bars);
+            for (let i = 0; i < bars; i++) {
+                let angle = (i / bars) * Math.PI * 2 - Math.PI / 2;
+                let val = data[i * step] / 255;
+                let len = r * 0.15 + val * r * 0.45;
+                let x1 = half + Math.cos(angle) * r * 0.5;
+                let y1 = half + Math.sin(angle) * r * 0.5;
+                let x2 = half + Math.cos(angle) * (r * 0.5 + len);
+                let y2 = half + Math.sin(angle) * (r * 0.5 + len);
+                c.strokeStyle = `rgba(127,204,74,${0.4 + val * 0.6})`;
+                c.lineWidth = 2;
+                c.beginPath(); c.moveTo(x1, y1); c.lineTo(x2, y2); c.stroke();
+            }
+            requestAnimationFrame(draw);
+        };
+        draw();
+    }
+}">
 {% if room_name %}
-    <div style="flex-grow: 0.7;">
-        <h1 style="
-        font-size:3rem;
-        padding: 3rem;
-        font-weight:bold;
-        margin:0;
-    ">{{ room_name }}</h1>
+    <h1 class="room-name">{{ room_name }}</h1>
+
+    <canvas id="viz" width="180" height="180"></canvas>
+
+    <div class="status">
+        <span x-show="!clickedPlay">ready</span>
+        <span x-show="clickedPlay && !$store.stecker.isPlaying" class="warn">connecting...</span>
+        <span x-show="$store.stecker.isPlaying" class="live">&#9679; streaming</span>
     </div>
 
-    <div style="
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-    ">
-        <button
-            @click="$store.stecker.joinRoom('{{ room_name }}', true, false, false, returnRoomPrefix, addRandomPostfix); clickedPlay=true;"
-            :style="{backgroundColor: borderColor()}"
-            :disabled="clickedPlay"
-            style="
-                padding:2rem 4rem;
-                font-size:1.5rem;
-                font-weight:bold;
-                cursor:pointer;"
-            >▶</button>
+    <button class="play-btn"
+        @click="play()"
+        :disabled="clickedPlay"
+    >&#9654;</button>
 
-        <audio id="audio-player" controls="controls" style="visibility: hidden;"></audio>
+    <audio id="audio-player" style="display:none"></audio>
 
-        <input type="range" min="0" max="100" value="80"
-            x-model="volume"
-            oninput="document.getElementById('audio-player').volume = this.value / 100"
-            style="
-                width:100%;
-                margin-top:1rem;"
-        >
-    </div>
+    <input type="range" min="0" max="100" value="80"
+        x-model="volume"
+        oninput="document.getElementById('audio-player').volume = this.value / 100"
+    >
 {% else %}
-    <div style="flex-grow: 0.3;">
-        <h1 style="
-        font-size:3rem;
-        padding: 3rem;
-        font-weight:bold;
-        margin:0;
-    ">Room not available</h1>
-    </div>
+    <p class="unavailable">room not available</p>
 {% endif %}
-
 </div>
 
 {% endblock %}
