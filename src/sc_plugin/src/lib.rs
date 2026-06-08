@@ -222,6 +222,7 @@ impl AudioRoomSender {
 
         let (close_sender, _) = broadcast::channel::<()>(1);
         let mut sc_close_receiver = close_sender.subscribe();
+        let mut encoding_close = close_sender.subscribe();
 
         runtime().spawn(async move {
             setup_tracing();
@@ -246,28 +247,34 @@ impl AudioRoomSender {
                     let mut buf = [0; 4096];
                     let mut ticker = tokio::time::interval(Duration::from_millis(20));
                     loop {
-                        let _ = ticker.tick().await;
-                        if consumer.observe().occupied_len() >= FRAME_SIZE {
-                            consumer.pop_slice(&mut raw_signal_buffer);
-                            match opus_encoder.encode_float(&raw_signal_buffer, &mut buf) {
-                                Ok(packet_size) => {
-                                    if let Err(err) = audio_track.write_sample(&Sample {
-                                        data: Bytes::copy_from_slice(&buf[0..packet_size]),
-                                        duration: Duration::from_millis(20),
-                                        ..Default::default()
-                                    }).await {
-                                        error!(error=?err, "Failed to write opus sample to the track");
+                        tokio::select! {
+                            _ = ticker.tick() => {
+                                if consumer.observe().occupied_len() >= FRAME_SIZE {
+                                    consumer.pop_slice(&mut raw_signal_buffer);
+                                    match opus_encoder.encode_float(&raw_signal_buffer, &mut buf) {
+                                        Ok(packet_size) => {
+                                            if let Err(err) = audio_track.write_sample(&Sample {
+                                                data: Bytes::copy_from_slice(&buf[0..packet_size]),
+                                                duration: Duration::from_millis(20),
+                                                ..Default::default()
+                                            }).await {
+                                                error!(error=?err, "Failed to write opus sample to the track");
+                                            }
+                                        },
+                                        Err(err) => {
+                                            error!(error=?err, "Failed to encode to opus frame");
+                                        },
                                     }
-                                },
-                                Err(err) => {
-                                    error!(error=?err, "Failed to encode to opus frame");
-                                },
+                                } else {
+                                    trace!("Not enough values in ringbuf yet");
+                                }
+                            },
+                            _ = encoding_close.recv() => {
+                                trace!("Encoding task stopped");
+                                break;
                             }
-                        } else {
-                            trace!("Not enough values in ringbuf yet");
                         }
                     }
-                    #[allow(unreachable_code)]
                     Ok::<(), anyhow::Error>(())
                 });
 
@@ -316,6 +323,7 @@ impl AudioRoomReceiver {
 
         let (close_sender, _) = broadcast::channel::<()>(1);
         let mut sc_close_receiver = close_sender.subscribe();
+        let mut decoding_close = close_sender.subscribe();
 
         runtime().spawn(async move {
             setup_tracing();
@@ -341,26 +349,45 @@ impl AudioRoomReceiver {
                     trace!("Wait for audio track to be received");
 
                     let received_audio_track = loop {
-                        if let Ok(ConnectionEvent::NewAudioChannel(track)) =
-                            audio_events.recv().await
-                        {
-                            break track;
+                        tokio::select! {
+                            event = audio_events.recv() => {
+                                if let Ok(ConnectionEvent::NewAudioChannel(track)) = event {
+                                    break track;
+                                }
+                            },
+                            _ = decoding_close.recv() => {
+                                trace!("Decoding task stopped while waiting for track");
+                                return Ok::<(), anyhow::Error>(());
+                            }
                         }
                     };
 
                     info!("Found a track! Start decoding");
 
-                    while let Ok((rtp, _)) = received_audio_track.read_rtp().await {
-                        match opus_decoder.decode_float(
-                            &*rtp.payload,
-                            &mut raw_signal_buffer,
-                            false,
-                        ) {
-                            Ok(opus_samples) => {
-                                producer.push_slice(&raw_signal_buffer[..opus_samples]);
-                            }
-                            Err(err) => {
-                                error!(error=?err, "Error decoding opus frame");
+                    loop {
+                        tokio::select! {
+                            rtp_result = received_audio_track.read_rtp() => {
+                                match rtp_result {
+                                    Ok((rtp, _)) => {
+                                        match opus_decoder.decode_float(
+                                            &*rtp.payload,
+                                            &mut raw_signal_buffer,
+                                            false,
+                                        ) {
+                                            Ok(opus_samples) => {
+                                                producer.push_slice(&raw_signal_buffer[..opus_samples]);
+                                            }
+                                            Err(err) => {
+                                                error!(error=?err, "Error decoding opus frame");
+                                            }
+                                        }
+                                    },
+                                    Err(_) => break,
+                                }
+                            },
+                            _ = decoding_close.recv() => {
+                                trace!("Decoding task stopped");
+                                break;
                             }
                         }
                     }
