@@ -73,7 +73,7 @@ steckerlib | `src/shared` | Library for shared functionality between client and 
 To start a server locally run e.g.
 
 ```shell
-cargo run --bin server -- --port 8000
+ulimit -n 65536 && cargo run --bin server -- --port 8000
 ```
 
 The HTML frontend of the server is accessible via [`http://localhost:8000/`](http://localhost:8000/).
