@@ -44,32 +44,26 @@ pub enum DataChannelKind {
 }
 
 pub trait ChannelAccess<T: SteckerData> {
-    fn get_field(
-        room: &BroadcastRoom,
-    ) -> Arc<tokio::sync::RwLock<Option<Arc<SteckerDataChannel<T>>>>>;
+    fn get_field(room: &BroadcastRoom) -> &RwLock<Option<Arc<SteckerDataChannel<T>>>>;
 }
 
 impl ChannelAccess<RoomFloatData> for DataChannelKind {
-    fn get_field(
-        room: &BroadcastRoom,
-    ) -> Arc<tokio::sync::RwLock<Option<Arc<SteckerDataChannel<RoomFloatData>>>>> {
-        room.float_channel.clone()
+    fn get_field(room: &BroadcastRoom) -> &RwLock<Option<Arc<SteckerDataChannel<RoomFloatData>>>> {
+        &room.float_channel
     }
 }
 
 impl ChannelAccess<RoomStringData> for DataChannelKind {
-    fn get_field(
-        room: &BroadcastRoom,
-    ) -> Arc<tokio::sync::RwLock<Option<Arc<SteckerDataChannel<RoomStringData>>>>> {
-        room.chat_channel.clone()
+    fn get_field(room: &BroadcastRoom) -> &RwLock<Option<Arc<SteckerDataChannel<RoomStringData>>>> {
+        &room.chat_channel
     }
 }
 
 #[derive(Debug)]
 pub struct BroadcastRoom {
-    audio_channel: Arc<RwLock<Option<Arc<SteckerAudioChannel>>>>,
-    float_channel: Arc<RwLock<Option<Arc<SteckerDataChannel<RoomFloatData>>>>>,
-    chat_channel: Arc<RwLock<Option<Arc<SteckerDataChannel<RoomStringData>>>>>,
+    audio_channel: RwLock<Option<Arc<SteckerAudioChannel>>>,
+    float_channel: RwLock<Option<Arc<SteckerDataChannel<RoomFloatData>>>>,
+    chat_channel: RwLock<Option<Arc<SteckerDataChannel<RoomStringData>>>>,
     /// if a stream gets taken over we must re-assign the audio_sequence_number b/c
     /// otherwhise the stream will think it has stalled, which will result in silence
     audio_sequence_offset: watch::Sender<u16>,
@@ -90,9 +84,9 @@ impl BroadcastRoom {
         let (free_room, _) = broadcast::channel::<()>(1);
         let (audio_sequence_offset, _) = watch::channel(0);
         Self {
-            audio_channel: Arc::new(RwLock::new(None)),
-            float_channel: Arc::new(RwLock::new(None)),
-            chat_channel: Arc::new(RwLock::new(None)),
+            audio_channel: RwLock::new(None),
+            float_channel: RwLock::new(None),
+            chat_channel: RwLock::new(None),
             meta: BroadcastRoomMeta::new(name.clone(), uuid, password.clone(), description),
             current_deletion_token: Arc::new(Mutex::new(CancellationToken::new())),
             free_room,
@@ -122,7 +116,7 @@ impl BroadcastRoom {
 
     /// replace sender of current broadcast
     pub async fn replace_sender(
-        &self,
+        self: &Arc<Self>,
         kind: ChannelKind,
         offer: String,
         password: Option<String>,
@@ -144,7 +138,7 @@ impl BroadcastRoom {
 
     #[instrument(skip_all)]
     async fn replace_audio_sender(
-        &self,
+        self: &Arc<Self>,
         offer: String,
         room_events: tokio::sync::broadcast::Sender<RoomEvent>,
     ) -> anyhow::Result<ResponseOffer> {
@@ -166,18 +160,12 @@ impl BroadcastRoom {
         );
         let offer = connection.respond_to_offer(&offer).await?;
 
-        let audio_sequence_offset = self.audio_sequence_offset.clone();
-        let room_name = self.meta.name.clone();
-        let audio_channel_handle = self.audio_channel.clone();
-        let room_deletion_token = self.current_deletion_token.clone();
-        let trigger_free_room = self.free_room.clone();
-        let active_channels = self.active_channels.clone();
-        let room_timeout = self.timeout;
+        let room = self.clone();
 
         tokio::spawn(
             async move {
-                room_deletion_token.lock().await.cancel();
-                *active_channels.lock().await += 1;
+                room.current_deletion_token.lock().await.cancel();
+                *room.active_channels.lock().await += 1;
 
                 let audio_track_reply = tokio::select! {
                     remote_track = connection.wait_for_audio_channel() => {
@@ -206,16 +194,17 @@ impl BroadcastRoom {
                             )),
                         }
                     };
-                    let _ = room_events.send(RoomEvent::BroadcastRoomUpdated(room_name));
+                    let _ =
+                        room_events.send(RoomEvent::BroadcastRoomUpdated(room.meta.name.clone()));
 
                     let mut reset_rx = audio_channel.reset_sender.subscribe();
-                    let offset = *audio_sequence_offset.borrow();
+                    let offset = *room.audio_sequence_offset.borrow();
                     loop {
                         tokio::select! {
                             Ok((mut rtp, _)) = audio_track.read_rtp() => {
                                 let mut seq_number = rtp.header.sequence_number;
                                 seq_number = seq_number.wrapping_add(offset);
-                                let _ = audio_sequence_offset.send(seq_number);
+                                let _ = room.audio_sequence_offset.send(seq_number);
                                 rtp.header.sequence_number = seq_number;
                                 let _ = local_track.write_rtp(&rtp).await;
                             },
@@ -223,7 +212,7 @@ impl BroadcastRoom {
                             _ = reset_rx.recv() => {
                                 info!("Sender replaced again");
                                 let _ = connection.close().await;
-                                *active_channels.lock().await -= 1;
+                                *room.active_channels.lock().await -= 1;
                                 return;
                             }
                             else => break,
@@ -233,13 +222,13 @@ impl BroadcastRoom {
 
                 let _ = connection.close().await;
                 trace!("Release audio channel");
-                *audio_channel_handle.write().await = None;
+                *room.audio_channel.write().await = None;
 
                 Self::check_deletion(
-                    active_channels,
-                    room_deletion_token,
-                    room_timeout,
-                    trigger_free_room,
+                    room.active_channels.clone(),
+                    room.current_deletion_token.clone(),
+                    room.timeout,
+                    room.free_room.clone(),
                 )
                 .await;
             }
@@ -287,7 +276,7 @@ impl BroadcastRoom {
 
     #[instrument(skip_all)]
     pub async fn create_data_channel<T>(
-        &self,
+        self: &Arc<Self>,
         offer: &String,
         kind: DataChannelKind,
     ) -> anyhow::Result<ResponseOffer>
@@ -307,23 +296,13 @@ impl BroadcastRoom {
         let data_channel = Arc::new(SteckerDataChannel::<T>::create_channels());
         let data_channel_clone = data_channel.clone();
         let mut channel_events = data_channel.events.clone().subscribe();
-        let data_channel_handle = DataChannelKind::get_field(&self);
-        *data_channel_handle.write().await = Some(data_channel);
+        *DataChannelKind::get_field(self).write().await = Some(data_channel);
 
-        // an async callback to see if a float channel has been set and also release it afterwards
-        // let data_channel_handle = data_channel_handle;
-        let room_deletion_token = self.current_deletion_token.clone();
-        let trigger_free_room = self.free_room.clone();
-        let active_channels = self.active_channels.clone();
-        let room_timeout = self.timeout.clone();
+        let room = self.clone();
         tokio::spawn(async move {
-            // alternative: bump the duration on connection success
             let mut active_timeout = true;
-            // @todo this can create a race condition b/c maybe in the meantime the room already got deleted?
-            // but if we trigger the cancellation earlier this can also lead to a dangling room while if e.g.
-            // build_connection fails.
-            room_deletion_token.lock().await.cancel();
-            *active_channels.lock().await += 1;
+            room.current_deletion_token.lock().await.cancel();
+            *room.active_channels.lock().await += 1;
             loop {
                 tokio::select! {
                     rtc_connection = connection.wait_for_data_channel::<T>() => {
@@ -342,9 +321,14 @@ impl BroadcastRoom {
             }
             let _ = connection.close().await;
             trace!("Release data channel");
-            *data_channel_handle.write().await = None;
+            *DataChannelKind::get_field(&room).write().await = None;
 
-            let _ = Self::check_deletion(active_channels, room_deletion_token, room_timeout, trigger_free_room).await;
+            Self::check_deletion(
+                room.active_channels.clone(),
+                room.current_deletion_token.clone(),
+                room.timeout,
+                room.free_room.clone(),
+            ).await;
         }.in_current_span());
 
         Ok(offer)
@@ -418,7 +402,7 @@ impl BroadcastRoom {
 
     #[instrument(skip_all)]
     pub async fn create_audio_channel(
-        &self,
+        self: &Arc<Self>,
         offer: &String,
         room_events: tokio::sync::broadcast::Sender<RoomEvent>,
     ) -> anyhow::Result<ResponseOffer> {
@@ -435,20 +419,12 @@ impl BroadcastRoom {
         let audio_channel_clone = audio_channel.clone();
         *self.audio_channel.write().await = Some(audio_channel);
 
-        // an async callback to see if a float channel has been set and also release it afterwards
-        // let data_channel_handle = data_channel_handle;
-        let room_deletion_token = self.current_deletion_token.clone();
-        let trigger_free_room = self.free_room.clone();
-        let active_channels = self.active_channels.clone();
-        let room_timeout = self.timeout.clone();
-        let audio_channel_handle = self.audio_channel.clone();
-        let audio_sequence_offset = self.audio_sequence_offset.clone();
-        let room_name = self.meta.name.clone();
+        let room = self.clone();
 
         tokio::spawn(
             async move {
-                room_deletion_token.lock().await.cancel();
-                *active_channels.lock().await += 1;
+                room.current_deletion_token.lock().await.cancel();
+                *room.active_channels.lock().await += 1;
                 let mut reset_rx = audio_channel_clone.reset_sender.subscribe();
                 let mut replaced = false;
 
@@ -476,15 +452,16 @@ impl BroadcastRoom {
                     let _ = audio_channel_clone
                         .audio_channel_tx
                         .send(Some(local_track.clone()));
-                    let _ = room_events.send(RoomEvent::BroadcastRoomStreaming(room_name));
+                    let _ =
+                        room_events.send(RoomEvent::BroadcastRoomStreaming(room.meta.name.clone()));
 
-                    let offset = *audio_sequence_offset.borrow();
+                    let offset = *room.audio_sequence_offset.borrow();
                     loop {
                         tokio::select! {
                             Ok((mut rtp, _)) = audio_track.read_rtp() => {
                                 let mut seq_number = rtp.header.sequence_number;
                                 seq_number = seq_number.wrapping_add(offset);
-                                let _ = audio_sequence_offset.send(seq_number);
+                                let _ = room.audio_sequence_offset.send(seq_number);
                                 rtp.header.sequence_number = seq_number;
                                 let _ = local_track.write_rtp(&rtp).await;
                             },
@@ -505,16 +482,16 @@ impl BroadcastRoom {
                 let _ = connection.close().await;
 
                 if replaced {
-                    *active_channels.lock().await -= 1;
+                    *room.active_channels.lock().await -= 1;
                 } else {
                     trace!("Release audio channel");
-                    *audio_channel_handle.write().await = None;
+                    *room.audio_channel.write().await = None;
 
                     Self::check_deletion(
-                        active_channels,
-                        room_deletion_token,
-                        room_timeout,
-                        trigger_free_room,
+                        room.active_channels.clone(),
+                        room.current_deletion_token.clone(),
+                        room.timeout,
+                        room.free_room.clone(),
                     )
                     .await;
                 }

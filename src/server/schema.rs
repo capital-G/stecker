@@ -6,7 +6,7 @@ use rand::distributions::{Alphanumeric, DistString};
 
 use anyhow::anyhow;
 use shared::models::{RoomFloatData, RoomStringData, API_VERSION};
-use tokio::{sync::RwLock, time::sleep};
+use tokio::time::sleep;
 
 use async_graphql::{Context, Enum, Object, SimpleObject};
 use tracing::{info, instrument, trace, Instrument, Span};

@@ -7,7 +7,6 @@ use rand::SeedableRng;
 use regex::Regex;
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::sync::RwLock;
 
 #[derive(Enum, Copy, Clone, Eq, PartialEq, Debug)]
 pub enum DispatcherType {
