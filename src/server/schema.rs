@@ -1,12 +1,6 @@
 use std::{sync::Arc, time::Duration};
 
-use crate::{
-    event_service::RoomEvent,
-    models::{
-        BroadcastRoom, ChannelKind, DataChannelKind, RoomCreationReply, RoomDispatcher,
-        RoomDispatcherInput, RoomType,
-    },
-};
+use crate::event_service::RoomEvent;
 use futures::future::join_all;
 use rand::distributions::{Alphanumeric, DistString};
 
@@ -18,6 +12,10 @@ use async_graphql::{Context, Enum, Object, SimpleObject};
 use tracing::{info, instrument, trace, Instrument, Span};
 use uuid::Uuid;
 
+use crate::models::dispatcher::{RoomDispatcher, RoomDispatcherInput};
+use crate::models::room::{
+    BroadcastRoom, ChannelKind, DataChannelKind, RoomCreationReply, RoomType,
+};
 use crate::AppState;
 
 pub struct Query;
@@ -145,14 +143,14 @@ impl Mutation {
                     .await
             }
             ChannelKind::DataChannel(kind) => match kind {
-                crate::models::DataChannelKind::Float => {
+                DataChannelKind::Float => {
                     room_clone
                         .read()
                         .await
                         .create_data_channel::<RoomFloatData>(&offer, kind)
                         .await
                 }
-                crate::models::DataChannelKind::String => {
+                DataChannelKind::String => {
                     room_clone
                         .read()
                         .await
@@ -209,13 +207,13 @@ impl Mutation {
             Some(room) => match channel_kind {
                 ChannelKind::AudioChannel => room.read().await.join_audio_channel(&offer).await,
                 ChannelKind::DataChannel(kind) => match kind {
-                    crate::models::DataChannelKind::Float => {
+                    DataChannelKind::Float => {
                         room.read()
                             .await
                             .join_data_channel::<RoomFloatData>(&offer, kind)
                             .await
                     }
-                    crate::models::DataChannelKind::String => {
+                    DataChannelKind::String => {
                         room.read()
                             .await
                             .join_data_channel::<RoomStringData>(&offer, kind)

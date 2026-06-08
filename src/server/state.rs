@@ -5,10 +5,9 @@ use tracing::{info, Instrument};
 use minijinja;
 use tokio::{sync::RwLock, time::sleep};
 
-use crate::{
-    event_service::RoomEvent,
-    models::{BroadcastRoom, RoomDispatcher, RoomDispatcherInput, RoomType},
-};
+use crate::event_service::RoomEvent;
+use crate::models::dispatcher::{RoomDispatcher, RoomDispatcherInput};
+use crate::models::room::{BroadcastRoom, RoomType};
 
 pub struct AppState {
     pub rooms: Arc<RwLock<HashMap<String, Arc<RwLock<BroadcastRoom>>>>>,
