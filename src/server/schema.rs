@@ -62,10 +62,11 @@ impl Query {
             guard.values().cloned().collect()
         };
 
-        join_all(room_locks.into_iter().map(|room_lock| async move {
-            let room = room_lock.read().await;
-            Room::from_broadcast_room(&*room).await
-        }))
+        join_all(
+            room_locks
+                .into_iter()
+                .map(|room| async move { Room::from_broadcast_room(&*room).await }),
+        )
         .await
     }
 
@@ -106,8 +107,6 @@ impl Mutation {
         if let Some(existing_room) = state.rooms.read().await.get(&name) {
             return Ok(RoomCreationReply {
                 offer: existing_room
-                    .read()
-                    .await
                     .replace_sender(
                         channel_kind,
                         offer,
@@ -125,44 +124,39 @@ impl Mutation {
             Alphanumeric.sample_string(&mut rand::thread_rng(), 8)
         };
 
-        let room = Arc::new(RwLock::new(BroadcastRoom::new(
+        let room = Arc::new(BroadcastRoom::new(
             name.clone(),
             room_password.clone(),
             connection_uuid,
             description.unwrap_or("".to_string()),
-        )));
+        ));
+
         let room_clone = room.clone();
+
         state.insert_room(name.clone(), room).await;
 
         let response = match channel_kind {
             ChannelKind::AudioChannel => {
                 room_clone
-                    .read()
-                    .await
                     .create_audio_channel(&offer, state.room_events.clone())
                     .await
             }
             ChannelKind::DataChannel(kind) => match kind {
                 DataChannelKind::Float => {
                     room_clone
-                        .read()
-                        .await
                         .create_data_channel::<RoomFloatData>(&offer, kind)
                         .await
                 }
                 DataChannelKind::String => {
                     room_clone
-                        .read()
-                        .await
                         .create_data_channel::<RoomStringData>(&offer, kind)
                         .await
                 }
             },
         }?;
 
-        let room_guard = room_clone.read().await;
         let room_map_clone = state.rooms.clone();
-        let mut remove_room = room_guard.free_room.clone().subscribe();
+        let mut remove_room = room_clone.free_room.clone().subscribe();
         tokio::spawn(
             async move {
                 if let Ok(()) = remove_room.recv().await {
@@ -205,19 +199,13 @@ impl Mutation {
 
         match state.rooms.read().await.get(&name) {
             Some(room) => match channel_kind {
-                ChannelKind::AudioChannel => room.read().await.join_audio_channel(&offer).await,
+                ChannelKind::AudioChannel => room.join_audio_channel(&offer).await,
                 ChannelKind::DataChannel(kind) => match kind {
                     DataChannelKind::Float => {
-                        room.read()
-                            .await
-                            .join_data_channel::<RoomFloatData>(&offer, kind)
-                            .await
+                        room.join_data_channel::<RoomFloatData>(&offer, kind).await
                     }
                     DataChannelKind::String => {
-                        room.read()
-                            .await
-                            .join_data_channel::<RoomStringData>(&offer, kind)
-                            .await
+                        room.join_data_channel::<RoomStringData>(&offer, kind).await
                     }
                 },
             },

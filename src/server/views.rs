@@ -67,7 +67,6 @@ pub async fn dispatcher_view(
     if let Some(dispatcher) = state.room_dispatchers.read().await.get(&dispatcher_name) {
         match state.get_room(dispatcher).await {
             Ok(room) => {
-                let room = room.read().await;
                 let mut uri = format!("/s/{}?", room.meta().name);
                 if let Some(return_prefix) = dispatcher.return_room_prefix.clone() {
                     uri.push_str(format!("&returnRoomPrefix={}", return_prefix).as_str());

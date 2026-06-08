@@ -10,7 +10,7 @@ use crate::models::dispatcher::{RoomDispatcher, RoomDispatcherInput};
 use crate::models::room::{BroadcastRoom, RoomType};
 
 pub struct AppState {
-    pub rooms: Arc<RwLock<HashMap<String, Arc<RwLock<BroadcastRoom>>>>>,
+    pub rooms: Arc<RwLock<HashMap<String, Arc<BroadcastRoom>>>>,
     pub room_dispatchers: Arc<RwLock<HashMap<String, RoomDispatcher>>>,
 
     pub room_events: tokio::sync::broadcast::Sender<RoomEvent>,
@@ -39,7 +39,7 @@ impl AppState {
         }
     }
 
-    pub async fn insert_room(&self, name: String, room: Arc<RwLock<BroadcastRoom>>) {
+    pub async fn insert_room(&self, name: String, room: Arc<BroadcastRoom>) {
         self.rooms.write().await.insert(name, room);
     }
 
@@ -74,7 +74,7 @@ impl AppState {
 
     pub async fn room_password_match(&self, room_name: &str, password: &str) -> bool {
         match self.rooms.read().await.get(room_name) {
-            Some(room) => room.read().await.meta().admin_password == password,
+            Some(room) => room.meta().admin_password == password,
             None => false,
         }
     }
@@ -147,13 +147,12 @@ impl AppState {
     pub async fn get_room(
         &self,
         dispatcher: &RoomDispatcher,
-    ) -> anyhow::Result<Arc<RwLock<BroadcastRoom>>> {
+    ) -> anyhow::Result<Arc<BroadcastRoom>> {
         let rooms_guard = self.rooms.read().await;
 
         let matched_rooms: Vec<_> = stream::iter(rooms_guard.values())
-            .filter_map(|room| async {
-                let room_guard = room.read().await;
-                if dispatcher.rule.is_match(&room_guard.meta().name) {
+            .filter_map(|room| async move {
+                if dispatcher.rule.is_match(&room.meta().name) {
                     Some(room.clone())
                 } else {
                     None

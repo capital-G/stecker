@@ -30,25 +30,20 @@ impl TryFrom<String> for DispatcherType {
 }
 
 impl DispatcherType {
-    pub async fn choose_room(
-        &self,
-        rooms: Vec<Arc<RwLock<BroadcastRoom>>>,
-    ) -> Option<Arc<RwLock<BroadcastRoom>>> {
-        let mut empty_rooms: Vec<(String, Arc<RwLock<BroadcastRoom>>)> =
-            stream::iter(rooms.clone())
-                .then(|room| async move {
-                    let (listeners, name) = {
-                        let guard = room.read().await;
-                        let listeners = *guard.meta().num_listeners.borrow();
-                        let name = guard.meta().name.clone();
-                        (listeners, name)
-                    };
-                    (listeners <= 0, name, room)
-                })
-                .filter(|(ok, _name, _room)| futures::future::ready(*ok))
-                .map(|(_ok, name, room)| (name, room))
-                .collect()
-                .await;
+    pub async fn choose_room(&self, rooms: Vec<Arc<BroadcastRoom>>) -> Option<Arc<BroadcastRoom>> {
+        let mut empty_rooms: Vec<(String, Arc<BroadcastRoom>)> = stream::iter(rooms.clone())
+            .then(|room| async move {
+                let (listeners, name) = {
+                    let listeners = *room.meta().num_listeners.borrow();
+                    let name = room.meta().name.clone();
+                    (listeners, name)
+                };
+                (listeners <= 0, name, room)
+            })
+            .filter(|(ok, _name, _room)| futures::future::ready(*ok))
+            .map(|(_ok, name, room)| (name, room))
+            .collect()
+            .await;
 
         match self {
             DispatcherType::Random => rooms.choose(&mut StdRng::from_entropy()).cloned(),
