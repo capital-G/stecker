@@ -405,17 +405,14 @@ unsafe fn send_data_message(data_room: *mut DataRoomSender, value: f32) {
 }
 
 unsafe fn close_data_sender_room(room: *mut DataRoomSender) {
-    if (!room.is_null()) {
+    if !room.is_null() {
         let room = unsafe { Box::from_raw(room) };
         room.close_sender.notify_one();
-        // @todo defer this to a delete queue which gets consumed in its own thread
-        drop(room);
     }
 }
 
 // data receiver
 unsafe fn join_data_room(name: &str, host: &str) -> *mut DataRoomReceiver {
-    // @todo this allocates on the RT thread!
     Box::into_raw(Box::new(DataRoomReceiver::join_room(
         name.to_string(),
         host.to_string(),
@@ -427,7 +424,10 @@ unsafe fn recv_data_message(data_room: *mut DataRoomReceiver) -> f32 {
 }
 
 unsafe fn close_data_receiver_room(data_room: *mut DataRoomReceiver) {
-    (*data_room).close_sender.notify_one();
+    if !data_room.is_null() {
+        let room = unsafe { Box::from_raw(data_room) };
+        room.close_sender.notify_one();
+    }
 }
 
 fn create_audio_room_sender(name: &str, password: &str, host: &str) -> Box<AudioRoomSender> {
