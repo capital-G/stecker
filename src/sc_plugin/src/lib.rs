@@ -28,17 +28,27 @@ fn runtime() -> &'static Runtime {
 }
 
 fn setup_tracing() {
+    use std::sync::Once;
+    static PANIC_HOOK: Once = Once::new();
+
     let filter = filter::Targets::new()
         .with_default(Level::ERROR)
         .with_target("stecker_sc", Level::TRACE)
         .with_target("shared", Level::TRACE);
 
-    // @todo impl FormatEvent to prefix logs with STECKER:
     let formatter = fmt::layer().with_ansi(false).compact().without_time();
 
     let subscriber = tracing_subscriber::registry().with(formatter).with(filter);
 
     let _ = subscriber.try_init();
+
+    PANIC_HOOK.call_once(|| {
+        let default_hook = std::panic::take_hook();
+        std::panic::set_hook(Box::new(move |info| {
+            eprintln!("STECKER PANIC: {info}");
+            default_hook(info);
+        }));
+    });
 }
 
 pub struct DataRoomReceiver {
