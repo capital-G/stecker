@@ -19,6 +19,8 @@ use tracing_subscriber::{self, filter, fmt};
 
 use webrtc::media::Sample;
 
+const CONNECTION_EVENT_CAPACITY: usize = 128;
+
 static RUNTIME: OnceLock<Runtime> = OnceLock::new();
 
 fn runtime() -> &'static Runtime {
@@ -56,7 +58,7 @@ impl DataRoomReceiver {
         runtime().spawn(async move {
             setup_tracing();
             let run = async {
-                let (events, _) = broadcast::channel::<ConnectionEvent>(16);
+                let (events, _) = broadcast::channel::<ConnectionEvent>(CONNECTION_EVENT_CAPACITY);
                 let connection = SteckerWebRTCConnection::build_connection(events).await?;
 
                 let data_channel = Arc::new(SteckerDataChannel::<RoomFloatData>::create_channels());
@@ -127,7 +129,7 @@ impl DataRoomSender {
         runtime().spawn(async move {
             setup_tracing();
             let run = async {
-                let (events, _) = broadcast::channel::<ConnectionEvent>(32);
+                let (events, _) = broadcast::channel::<ConnectionEvent>(CONNECTION_EVENT_CAPACITY);
                 let connection = Arc::new(SteckerWebRTCConnection::build_connection(events).await?);
 
                 let data_channel = Arc::new(SteckerDataChannel::<RoomFloatData>::create_channels());
@@ -214,7 +216,7 @@ impl AudioRoomSender {
         runtime().spawn(async move {
             setup_tracing();
             let run = async {
-                let (events, _) = broadcast::channel::<ConnectionEvent>(16);
+                let (events, _) = broadcast::channel::<ConnectionEvent>(CONNECTION_EVENT_CAPACITY);
                 let connection = SteckerWebRTCConnection::build_connection(events).await?;
                 let audio_track = connection.create_audio_channel().await?;
                 let offer = connection.create_offer().await?;
@@ -308,7 +310,7 @@ impl AudioRoomReceiver {
         runtime().spawn(async move {
             setup_tracing();
             let run = async {
-                let (events, _) = broadcast::channel::<ConnectionEvent>(16);
+                let (events, _) = broadcast::channel::<ConnectionEvent>(CONNECTION_EVENT_CAPACITY);
                 let connection = SteckerWebRTCConnection::build_connection(events).await?;
                 let mut audio_events = connection.connection_events.subscribe();
                 connection.add_recvonly_audio_transceiver().await?;
