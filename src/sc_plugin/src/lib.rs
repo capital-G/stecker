@@ -1,5 +1,3 @@
-use std::f32::NAN;
-use std::str::FromStr;
 use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
@@ -11,11 +9,11 @@ use ringbuf::{HeapCons, HeapProd, HeapRb};
 use shared::connections::ConnectionEvent;
 use shared::models::{RoomAudioData, RoomFloatData, SteckerDataChanelTrait, SteckerDataChannel};
 use tokio::runtime::Runtime;
-use tokio::sync::broadcast::{self, Receiver, Sender};
+use tokio::sync::broadcast::{self, Sender};
 
-use shared::{api::APIClient, connections::SteckerWebRTCConnection, models::SteckerData};
-use tokio::sync::{mpsc, oneshot, watch, Notify};
-use tracing::{error, info, info_span, instrument, trace, Instrument, Level};
+use shared::{api::APIClient, connections::SteckerWebRTCConnection};
+use tokio::sync::{watch, Notify};
+use tracing::{error, info, info_span, instrument, trace, Level};
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::{self, filter, fmt};
@@ -51,62 +49,56 @@ impl DataRoomReceiver {
         let close_receiver = close_sender.clone();
 
         thread::spawn(move || {
-            {
             setup_tracing();
-            let rt = Runtime::new().expect("Could not spawn async runtime");
-            rt.block_on(async {
-                let (events, _) = broadcast::channel::<ConnectionEvent>(16);
-                let connection = SteckerWebRTCConnection::build_connection(events).await.expect("Could  not create peer connection");
+            let run = || -> anyhow::Result<()> {
+                let rt = Runtime::new()?;
+                rt.block_on(async {
+                    let (events, _) = broadcast::channel::<ConnectionEvent>(16);
+                    let connection = SteckerWebRTCConnection::build_connection(events).await?;
 
-                let data_channel = Arc::new(SteckerDataChannel::<RoomFloatData>::create_channels());
-                let mut inbound_data = data_channel.inbound.subscribe();
+                    let data_channel =
+                        Arc::new(SteckerDataChannel::<RoomFloatData>::create_channels());
+                    let mut inbound_data = data_channel.inbound.subscribe();
 
-                let _ = connection.create_data_channel(data_channel).await;
-                let offer = connection.create_offer().await.unwrap();
+                    connection.create_data_channel(data_channel).await?;
+                    let offer = connection.create_offer().await?;
 
-                let api_client = APIClient::new(host.to_string());
+                    let api_client = APIClient::new(host.to_string());
+                    let answer = api_client.join_room::<RoomFloatData>(&name, &offer).await?;
+                    connection.set_remote_description(answer).await?;
 
-                match api_client.join_room::<RoomFloatData>(&name, &offer).await {
-                    Ok(answer) => {
-                        connection.set_remote_description(answer).await.unwrap();
-                        loop {
-                            tokio::select! {
-                                msg = inbound_data.recv() => {
-                                    match msg {
-                                        Ok(data) => {
-                                            match value_setter.send(data) {
-                                                Ok(_) => {},
-                                                Err(err) => {
-                                                    error!(?err, "Failed to send WebRTC message");
-                                                    break;
-                                                },
-                                            }
-                                        },
-                                        Err(err) => {
-                                            error!(?err, "Failed to receive webrtc data messages");
+                    loop {
+                        tokio::select! {
+                            msg = inbound_data.recv() => {
+                                match msg {
+                                    Ok(data) => {
+                                        if value_setter.send(data).is_err() {
                                             break;
-                                        },
-                                    };
-                                },
-                                _ = connection.wait_for_disconnect() => {
-                                    info!("Server closed connection!");
-                                    break
-                                }
-                                _ = close_receiver.notified() => {
-                                    trace!("Received supercollider close signal");
-                                    break
-                                }
+                                        }
+                                    },
+                                    Err(err) => {
+                                        error!(?err, "Failed to receive webrtc data messages");
+                                        break;
+                                    },
+                                };
+                            },
+                            _ = connection.wait_for_disconnect() => {
+                                info!("Server closed connection!");
+                                break
+                            }
+                            _ = close_receiver.notified() => {
+                                trace!("Received supercollider close signal");
+                                break
                             }
                         }
-                        connection.close().await.unwrap();
-                        trace!("Close connection");
                     }
-                    Err(err) => {
-                        error!(?err, "Failed to join room");
-                    }
-                }
-            });
-        }.in_current_span()
+                    let _ = connection.close().await;
+                    Ok(())
+                })
+            };
+            if let Err(err) = run() {
+                error!(error=?err, "Data receiver failed");
+            }
         });
         Self {
             close_sender,
@@ -131,67 +123,57 @@ impl DataRoomSender {
         let close_sender2 = close_sender.clone();
         let close_receiver = close_sender.clone();
 
-        // @todo add this to a queue so that we don't spawn a thread in the RT thread...
         thread::spawn(move || {
-            {
             setup_tracing();
-            let rt = Runtime::new().unwrap();
-            rt.block_on(async {
-                let (events, _) = broadcast::channel::<ConnectionEvent>(32);
-                let connection = Arc::new(SteckerWebRTCConnection::build_connection(events).await.expect("Failed to create peer connection"));
-                let data_channel = Arc::new(SteckerDataChannel::<RoomFloatData>::create_channels());
-                let data_channel_outbound = data_channel.outbound.clone();
-                println!("About to create data channel");
-                connection.create_data_channel(data_channel).await.expect("Could not create data channel in peer connection");
-                println!("Created data channel");
-                let offer = connection.create_offer().await.expect("Could not create offer");
+            let result: anyhow::Result<()> = (|| {
+                let rt = Runtime::new()?;
+                rt.block_on(async {
+                    let (events, _) = broadcast::channel::<ConnectionEvent>(32);
+                    let connection = Arc::new(SteckerWebRTCConnection::build_connection(events).await?);
 
-                let api_client = APIClient::new(host.to_string());
+                    let data_channel = Arc::new(SteckerDataChannel::<RoomFloatData>::create_channels());
+                    let data_channel_outbound = data_channel.outbound.clone();
+                    connection.create_data_channel(data_channel).await?;
+                    let offer = connection.create_offer().await?;
 
-                match api_client.create_room::<RoomFloatData>(&name, password.as_ref().map(|x| x.as_str()), &offer).await {
-                    Ok(answer) => {
-                        let _ = connection.set_remote_description(answer.session_description).await.expect("Could not set session description");
-                        trace!(password=answer.password, "Created data room on server");
-                    }
-                    Err(err) => {
-                        error!(?err, "Failed to create room on server, closing connection");
-                        close_sender.notify_one();
-                    },
-                }
+                    let api_client = APIClient::new(host.to_string());
 
-                loop {
-                    tokio::select! {
-                        received = value_getter.changed() =>{
-                            match received {
-                                Ok(_) => {
-                                    match data_channel_outbound.send(*value_getter.borrow_and_update()) {
-                                        Ok(_) => {}
-                                        Err(err) => {
-                                            error!(?err, "Could not send out message");
-                                        }
-                                    }
-                                },
-                                Err(_) => {
-                                    error!("Failed to receive value - terminating");
-                                    break
-                                },
-                            }
+                    let answer = match api_client.create_room::<RoomFloatData>(&name, password.as_ref().map(|x| x.as_str()), &offer).await {
+                        Ok(answer) => answer,
+                        Err(err) => {
+                            close_sender.notify_one();
+                            return Err(err);
                         },
-                        // this doesn't seem to work - why?
-                        // _ = connection.wait_for_disconnect() => {
-                        //     error!("Server closed connection");
-                        //     break
-                        // },
-                        _ = close_receiver.notified() => {
-                            trace!("Stop consuming");
-                            break
-                        }
                     };
-                }
-                trace!("Stopped forwarding messages from SC to WebRTC");
-                let _ = connection.close().await;
-            })
-        }.in_current_span()
+                    connection.set_remote_description(answer.session_description).await?;
+                    trace!(password=answer.password, "Created data room on server");
+
+                    loop {
+                        tokio::select! {
+                            received = value_getter.changed() => {
+                                match received {
+                                    Ok(_) => {
+                                        let _ = data_channel_outbound.send(*value_getter.borrow_and_update());
+                                    },
+                                    Err(_) => {
+                                        error!("Failed to receive value - terminating");
+                                        break
+                                    },
+                                }
+                            },
+                            _ = close_receiver.notified() => {
+                                trace!("Stop consuming");
+                                break
+                            }
+                        };
+                    }
+                    let _ = connection.close().await;
+                    Ok(())
+                })
+            })();
+            if let Err(err) = result {
+                error!(error=?err, "Data sender failed");
+            }
         });
 
         Self {
@@ -232,72 +214,65 @@ impl AudioRoomSender {
         let mut sc_close_receiver = close_sender.subscribe();
 
         thread::spawn(move || {
-            {
             setup_tracing();
-            let rt = Runtime::new().unwrap();
-            rt.block_on(async {
-                let (events, _) = broadcast::channel::<ConnectionEvent>(16);
-                let connection = SteckerWebRTCConnection::build_connection(events).await.expect("Failed to create peer connection");
-                let audio_track = connection.create_audio_channel().await.expect("Could not create audio channel");
-                let offer = connection.create_offer().await.expect("Could not create offer");
+            let run = || -> anyhow::Result<()> {
+                let rt = Runtime::new()?;
+                rt.block_on(async {
+                    let (events, _) = broadcast::channel::<ConnectionEvent>(16);
+                    let connection = SteckerWebRTCConnection::build_connection(events).await?;
+                    let audio_track = connection.create_audio_channel().await?;
+                    let offer = connection.create_offer().await?;
 
-                trace!(offer=offer, "Generated base64 encoded offer");
+                    trace!(offer=offer, "Generated base64 encoded offer");
 
-                tokio::spawn(async move {
-                    let _guard = encoding_span.enter();
-                    let mut opus_encoder = OpusEncoder::new(
-                        sample_rate.into(),
-                        OpusChannels::Mono,
-                        opus::Application::Audio
-                    ).expect("Could not init the opus encoder");
-                    let _ = opus_encoder.set_bitrate(opus::Bitrate::Bits(96000));
-                    info!("Start encoding");
-                    let mut raw_signal_buffer = [0.0f32; FRAME_SIZE];
-                    let mut buf = [0; 4096];
-                    let mut ticker = tokio::time::interval(Duration::from_millis(20));
-                    loop {
-                        let _ = ticker.tick().await;
-                        if consumer.observe().occupied_len() >= FRAME_SIZE {
-                            consumer.pop_slice(&mut raw_signal_buffer);
-                            let encoding_result = opus_encoder.encode_float(&raw_signal_buffer, &mut buf);
-                            match encoding_result {
-                                Ok(packet_size) => {
-                                    let result = audio_track.write_sample(&Sample {
-                                        data: Bytes::copy_from_slice(&buf[0..packet_size]),
-                                        duration: Duration::from_millis(20),
-                                        ..Default::default()
-                                    }).await;
-                                    if let Err(err) = result {
-                                        error!(error=?err, "Failed to write opus sample to the track");
-                                    }
-                                },
-                                Err(err) => {
-                                    error!(error=?err, "Failed to encode to opus frame.");
-                                },
+                    tokio::spawn(async move {
+                        let _guard = encoding_span.enter();
+                        let mut opus_encoder = OpusEncoder::new(
+                            sample_rate.into(),
+                            OpusChannels::Mono,
+                            opus::Application::Audio
+                        )?;
+                        let _ = opus_encoder.set_bitrate(opus::Bitrate::Bits(96000));
+                        info!("Start encoding");
+                        let mut raw_signal_buffer = [0.0f32; FRAME_SIZE];
+                        let mut buf = [0; 4096];
+                        let mut ticker = tokio::time::interval(Duration::from_millis(20));
+                        loop {
+                            let _ = ticker.tick().await;
+                            if consumer.observe().occupied_len() >= FRAME_SIZE {
+                                consumer.pop_slice(&mut raw_signal_buffer);
+                                match opus_encoder.encode_float(&raw_signal_buffer, &mut buf) {
+                                    Ok(packet_size) => {
+                                        if let Err(err) = audio_track.write_sample(&Sample {
+                                            data: Bytes::copy_from_slice(&buf[0..packet_size]),
+                                            duration: Duration::from_millis(20),
+                                            ..Default::default()
+                                        }).await {
+                                            error!(error=?err, "Failed to write opus sample to the track");
+                                        }
+                                    },
+                                    Err(err) => {
+                                        error!(error=?err, "Failed to encode to opus frame");
+                                    },
+                                }
+                            } else {
+                                trace!("Not enough values in ringbuf yet");
                             }
-                        } else {
-                            error!("Not enough values in ringbuf yet!");
                         }
-                    }
-                });
+                        #[allow(unreachable_code)]
+                        Ok::<(), anyhow::Error>(())
+                    });
 
-                let api_client = APIClient::new(host2.to_string());
-
-                match api_client.create_room::<RoomAudioData>(
-                        &name2,
-                        Some(&password2),
-                        &offer,
-                    ).await {
-                    Ok(answer) => {
-                        connection.set_remote_description(answer.session_description).await.expect("Could not set remote description");
-                        let _ = sc_close_receiver.recv().await;
-                    }
-                    Err(err) => {
-                        error!(error=?err, "Failed to create audio room on server.");
-                    },
-                }
-            })
-        }.in_current_span()
+                    let api_client = APIClient::new(host2.to_string());
+                    let answer = api_client.create_room::<RoomAudioData>(&name2, Some(&password2), &offer).await?;
+                    connection.set_remote_description(answer.session_description).await?;
+                    let _ = sc_close_receiver.recv().await;
+                    Ok(())
+                })
+            };
+            if let Err(err) = run() {
+                error!(error=?err, "Audio sender failed");
+            }
         });
 
         trace!("Created the audio sender");
@@ -336,79 +311,64 @@ impl AudioRoomReceiver {
         let mut sc_close_receiver = close_sender.subscribe();
 
         thread::spawn(move || {
-            {
-                setup_tracing();
-                let rt = Runtime::new().unwrap();
+            setup_tracing();
+            let run = || -> anyhow::Result<()> {
+                let rt = Runtime::new()?;
                 rt.block_on(async {
                     let (events, _) = broadcast::channel::<ConnectionEvent>(16);
-                    let connection = SteckerWebRTCConnection::build_connection(events)
-                        .await
-                        .expect("Failed to create peer connection");
+                    let connection = SteckerWebRTCConnection::build_connection(events).await?;
                     let mut audio_events = connection.connection_events.subscribe();
-                    connection
-                        .add_recvonly_audio_transceiver()
-                        .await
-                        .expect("Could not add audio transceiver");
-                    let offer = connection
-                        .create_offer()
-                        .await
-                        .expect("Could not create offer");
+                    connection.add_recvonly_audio_transceiver().await?;
+                    let offer = connection.create_offer().await?;
 
                     trace!(offer = offer, "Generated base64 offer");
 
                     let api_client = APIClient::new(host2);
+                    let answer = api_client
+                        .join_room::<RoomAudioData>(&name2, &offer)
+                        .await?;
+                    connection.set_remote_description(answer).await?;
 
-                    match api_client.join_room::<RoomAudioData>(&name2, &offer).await {
-                        Ok(answer) => {
-                            trace!("Received remote offer");
-                            connection
-                                .set_remote_description(answer)
-                                .await
-                                .expect("Could not set remote description");
+                    tokio::spawn(async move {
+                        let _guard = decoding_span.enter();
+                        let mut opus_decoder = OpusDecoder::new(48000, OpusChannels::Mono)?;
+                        let mut raw_signal_buffer: Vec<f32> = vec![0.0; 5760];
+                        trace!("Wait for audio track to be received");
 
-                            tokio::spawn(async move {
-                                let _guard = decoding_span.enter();
-                                let mut opus_decoder = OpusDecoder::new(48000, OpusChannels::Mono)
-                                    .expect("Could not init the opus decoder");
-                                let mut raw_signal_buffer: Vec<f32> = vec![0.0; 5760];
-                                trace!("Wait for audio track to be received");
+                        let received_audio_track = loop {
+                            if let Ok(ConnectionEvent::NewAudioChannel(track)) =
+                                audio_events.recv().await
+                            {
+                                break track;
+                            }
+                        };
 
-                                let received_audio_track = loop {
-                                    if let Ok(ConnectionEvent::NewAudioChannel(track)) =
-                                        audio_events.recv().await
-                                    {
-                                        break track;
-                                    }
-                                };
+                        info!("Found a track! Start decoding");
 
-                                info!("Found a track! Start decoding");
-
-                                while let Ok((rtp, _)) = received_audio_track.read_rtp().await {
-                                    match opus_decoder.decode_float(
-                                        &*rtp.payload,
-                                        &mut raw_signal_buffer,
-                                        false,
-                                    ) {
-                                        Ok(opus_samples) => {
-                                            producer.push_slice(&raw_signal_buffer[..opus_samples]);
-                                        }
-                                        Err(err) => {
-                                            error!(error=?err, "Error decoding opus frame");
-                                        }
-                                    }
+                        while let Ok((rtp, _)) = received_audio_track.read_rtp().await {
+                            match opus_decoder.decode_float(
+                                &*rtp.payload,
+                                &mut raw_signal_buffer,
+                                false,
+                            ) {
+                                Ok(opus_samples) => {
+                                    producer.push_slice(&raw_signal_buffer[..opus_samples]);
                                 }
-                            });
+                                Err(err) => {
+                                    error!(error=?err, "Error decoding opus frame");
+                                }
+                            }
+                        }
+                        Ok::<(), anyhow::Error>(())
+                    });
 
-                            let _ = sc_close_receiver.recv().await;
-                            info!("Close connection now");
-                        }
-                        Err(err) => {
-                            error!(error=?err, "Failed to join audio room on server");
-                        }
-                    }
+                    let _ = sc_close_receiver.recv().await;
+                    Ok(())
                 })
+            };
+            if let Err(err) = run() {
+                error!(error=?err, "Audio receiver failed");
             }
-            .in_current_span()
         });
 
         Self {

@@ -2674,6 +2674,7 @@ dependencies = [
 name = "stecker_sc"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "bytes",
  "cxx",
  "cxx-build",
