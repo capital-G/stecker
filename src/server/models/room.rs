@@ -149,7 +149,7 @@ impl BroadcastRoom {
             }
         };
 
-        let _ = audio_channel.reset_sender.send(());
+        audio_channel.reset_sender.notify_waiters();
 
         let (connection_events, _) = broadcast::channel(256);
         let connection = Arc::new(
@@ -196,7 +196,7 @@ impl BroadcastRoom {
                     let _ =
                         room_events.send(RoomEvent::BroadcastRoomUpdated(room.meta.name.clone()));
 
-                    let mut reset_rx = audio_channel.reset_sender.subscribe();
+                    let reset_notify = audio_channel.reset_sender.clone();
                     let offset = *room.audio_sequence_offset.borrow();
                     loop {
                         tokio::select! {
@@ -208,7 +208,7 @@ impl BroadcastRoom {
                                 let _ = local_track.write_rtp(&rtp).await;
                             },
                             _ = connection.wait_for_disconnect() => break,
-                            _ = reset_rx.recv() => {
+                            _ = reset_notify.notified() => {
                                 info!("Sender replaced again");
                                 let _ = connection.close().await;
                                 *room.active_channels.lock().await -= 1;
@@ -424,7 +424,7 @@ impl BroadcastRoom {
             async move {
                 room.current_deletion_token.lock().await.cancel();
                 *room.active_channels.lock().await += 1;
-                let mut reset_rx = audio_channel_clone.reset_sender.subscribe();
+                let reset_notify = audio_channel_clone.reset_sender.clone();
                 let mut replaced = false;
 
                 let audio_track_reply = tokio::select! {
@@ -465,7 +465,7 @@ impl BroadcastRoom {
                                 let _ = local_track.write_rtp(&rtp).await;
                             },
                             _ = connection.wait_for_disconnect() => break,
-                            _ = reset_rx.recv() => {
+                            _ = reset_notify.notified() => {
                                 info!("Sender replaced");
                                 replaced = true;
                                 break;

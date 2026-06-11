@@ -6,6 +6,7 @@ use std::{
 };
 
 use bytes::{Buf, BufMut, Bytes, BytesMut};
+use tokio::sync::Notify;
 use tokio::{
     sync::{
         broadcast::{self, Sender},
@@ -189,7 +190,7 @@ pub struct SteckerAudioChannel {
     // sends a signal if the connection was closed by our peer
     pub close: Sender<()>,
     // drops the current source WebRTC connection so it can be replaced by a new one
-    pub reset_sender: Sender<()>,
+    pub reset_sender: Arc<Notify>,
     // if we want to replace a running sender, we also need to continue the sequence_number
     // of the RTP packages
     pub sequence_number: watch::Sender<u16>,
@@ -199,7 +200,7 @@ impl SteckerAudioChannel {
     pub fn create_channels() -> Self {
         let (close, _) = broadcast::channel::<()>(1);
         let (audio_channel_tx, audio_channel_rx) = tokio::sync::watch::channel(None);
-        let (reset_sender, _) = broadcast::channel::<()>(1);
+        let reset_sender = Arc::new(Notify::new());
         let (sequence_number, _) = watch::channel::<u16>(0);
         SteckerAudioChannel {
             audio_channel_tx,
