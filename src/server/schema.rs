@@ -1,26 +1,52 @@
 use std::{sync::Arc, time::Duration};
 
-use crate::{
-    event_service::RoomEvent,
-    models::{
-        AudioBroadcastRoom, BroadcastRoom, DataBroadcastRoom, Room, RoomCreationReply,
-        RoomDispatcher, RoomDispatcherInput, RoomType,
-    },
-    state::RoomMapTrait,
-};
+use crate::event_service::RoomEvent;
+use futures::future::join_all;
 use rand::distributions::{Alphanumeric, DistString};
 
 use anyhow::anyhow;
-use shared::models::API_VERSION;
-use tokio::{sync::RwLock, time::sleep};
+use shared::models::{RoomFloatData, RoomStringData, API_VERSION};
+use tokio::time::sleep;
 
-use async_graphql::{Context, Object};
+use async_graphql::{Context, Enum, Object, SimpleObject};
 use tracing::{info, instrument, trace, Instrument, Span};
 use uuid::Uuid;
 
+use crate::models::dispatcher::{RoomDispatcher, RoomDispatcherInput};
+use crate::models::room::{
+    BroadcastRoom, ChannelKind, DataChannelKind, RoomCreationReply, RoomType,
+};
 use crate::AppState;
 
 pub struct Query;
+
+#[derive(SimpleObject)]
+pub struct Room {
+    name: String,
+    uuid: String,
+    audio_channel: bool,
+    chat_channel: bool,
+    float_channel: bool,
+    description: String,
+    num_listeners: u32,
+}
+
+impl Room {
+    pub async fn from_broadcast_room(broadcast_room: &BroadcastRoom) -> Self {
+        let current_channels = broadcast_room.get_current_channel_types().await;
+        Self {
+            name: broadcast_room.meta().name.clone(),
+            audio_channel: current_channels.contains(&ChannelKind::AudioChannel),
+            chat_channel: current_channels
+                .contains(&ChannelKind::DataChannel(DataChannelKind::String)),
+            float_channel: current_channels
+                .contains(&ChannelKind::DataChannel(DataChannelKind::Float)),
+            uuid: broadcast_room.meta().uuid.into(),
+            description: broadcast_room.meta().description.clone(),
+            num_listeners: 0,
+        }
+    }
+}
 
 #[Object]
 impl Query {
@@ -28,25 +54,27 @@ impl Query {
         API_VERSION.to_string()
     }
 
-    async fn rooms<'a>(&self, ctx: &Context<'a>, room_type: RoomType) -> Vec<Room> {
+    async fn rooms<'a>(&self, ctx: &Context<'a>) -> Vec<Room> {
         let state = ctx.data_unchecked::<Arc<AppState>>();
 
-        match room_type {
-            RoomType::Float => state.float_rooms.get_rooms().await,
-            RoomType::Chat => state.chat_rooms.get_rooms().await,
-            RoomType::Audio => state.audio_rooms.get_rooms().await,
-        }
+        let room_locks: Vec<_> = {
+            let guard = state.rooms.read().await;
+            guard.values().cloned().collect()
+        };
+
+        join_all(
+            room_locks
+                .into_iter()
+                .map(|room| async move { Room::from_broadcast_room(&*room).await }),
+        )
+        .await
     }
 
     async fn room_dispatchers<'a>(&self, ctx: &Context<'a>) -> Vec<RoomDispatcher> {
         let state = ctx.data_unchecked::<Arc<AppState>>();
-        state
-            .room_dispatchers
-            .read()
-            .await
-            .values()
-            .map(|x| x.clone())
-            .collect()
+
+        let guard = state.room_dispatchers.read().await;
+        guard.values().cloned().collect()
     }
 }
 
@@ -67,36 +95,27 @@ impl Mutation {
         ctx: &Context<'a>,
         name: String,
         offer: String,
-        room_type: RoomType,
+        channel_type: ChannelType,
         password: Option<String>,
+        description: Option<String>,
     ) -> anyhow::Result<RoomCreationReply> {
         let connection_uuid = Uuid::new_v4();
         tracing::Span::current().record("connection_uuid", connection_uuid.to_string());
-
         let state = ctx.data_unchecked::<Arc<AppState>>();
+        let channel_kind: ChannelKind = channel_type.into();
 
-        if state.room_exists(&name, &room_type).await {
-            if let Some(user_provided_password) = password {
-                if state
-                    .room_password_match(&name, &room_type, &user_provided_password)
-                    .await
-                {
-                    trace!("Matched password of existing room");
-                    let offer = state
-                        .replace_sender(&name, &room_type, &user_provided_password, &offer)
-                        .await?;
-
-                    let _ = state
-                        .room_events
-                        .send(RoomEvent::BroadcastRoomUpdated(name.clone()));
-
-                    return Ok(RoomCreationReply {
+        if let Some(existing_room) = state.rooms.read().await.get(&name) {
+            return Ok(RoomCreationReply {
+                offer: existing_room
+                    .replace_sender(
+                        channel_kind,
                         offer,
-                        password: user_provided_password,
-                    });
-                }
-            };
-            return Err(anyhow!("The room name is already taken."));
+                        password.clone(),
+                        state.room_events.clone(),
+                    )
+                    .await?,
+                password: password.unwrap_or("".to_string()),
+            });
         }
 
         let room_password: String = if let Some(user_provided_password) = password {
@@ -105,104 +124,52 @@ impl Mutation {
             Alphanumeric.sample_string(&mut rand::thread_rng(), 8)
         };
 
-        let name2 = name.clone();
-        let name3 = name.clone();
-        let room_password2 = room_password.clone();
-        match room_type {
-            RoomType::Float | RoomType::Chat => {
-                let result = DataBroadcastRoom::create_room(
-                    name,
-                    offer,
-                    room_type.into(),
-                    room_password,
-                    state.room_events.clone(),
-                )
-                .instrument(Span::current())
-                .await?;
-                {
-                    let mut room_lock = match room_type {
-                        RoomType::Float => {
-                            info!("Created a float room");
-                            state.float_rooms.map.write().await
-                        }
-                        RoomType::Chat => {
-                            info!("Created a chat room");
-                            state.chat_rooms.map.write().await
-                        }
-                        RoomType::Audio => {
-                            todo!("This can not happen - can we inherit the types from above?")
-                        }
-                    };
-                    let room = Arc::new(RwLock::new(BroadcastRoom::Data(result.broadcast_room)));
-                    room_lock.insert(name2, room.clone());
-                }
-                Ok(RoomCreationReply {
-                    offer: result.offer,
-                    password: room_password2,
-                })
+        let room = Arc::new(BroadcastRoom::new(
+            name.clone(),
+            room_password.clone(),
+            connection_uuid,
+            description.unwrap_or("".to_string()),
+        ));
+
+        let room_clone = room.clone();
+
+        state.insert_room(name.clone(), room).await;
+
+        let response = match channel_kind {
+            ChannelKind::AudioChannel => {
+                room_clone
+                    .create_audio_channel(&offer, state.room_events.clone())
+                    .await
             }
-            RoomType::Audio => {
-                let result = AudioBroadcastRoom::create_room(
-                    name,
-                    offer,
-                    room_password,
-                    state.room_events.clone(),
-                )
-                .in_current_span()
-                .await?;
-                {
-                    let mut room_lock = match room_type {
-                        RoomType::Audio => state.audio_rooms.map.write().await,
-                        _ => {
-                            todo!("This can not happen - can we inherit the types from above?")
-                        }
-                    };
-
-                    let mut stream_sequence_number = result
-                        .audio_broadcast_room
-                        .stecker_audio_channel
-                        .sequence_number_receiver
-                        .clone();
-
-                    let room = Arc::new(RwLock::new(BroadcastRoom::Audio(
-                        result.audio_broadcast_room,
-                    )));
-                    let name3 = name2.clone();
-                    let name4 = name2.clone();
-                    let room_events_sender = state.room_events.clone();
-                    room_lock.insert(name2, room.clone());
-
-                    let audio_room = state.audio_rooms.map.clone();
-
-                    tokio::spawn(async move {
-                        loop {
-                            tokio::select! {
-                                _ = stream_sequence_number.changed() => {},
-                                _ = tokio::time::sleep(Duration::from_secs(30)) => {
-                                    info!("Timeout for not receiving any package from the sender");
-                                    break;
-                                }
-                            }
-                        }
-                        let _ = room_events_sender.send(RoomEvent::BroadcastRoomDeleted(name4.clone()));
-                        let mut audio_room_mutex_lock = audio_room.write().await;
-                        audio_room_mutex_lock.remove(&name3);
-                        info!("Cleared room");
-                    }
-                    .in_current_span(),);
+            ChannelKind::DataChannel(kind) => match kind {
+                DataChannelKind::Float => {
+                    room_clone
+                        .create_data_channel::<RoomFloatData>(&offer, kind)
+                        .await
                 }
-                info!("Created an audio room");
+                DataChannelKind::String => {
+                    room_clone
+                        .create_data_channel::<RoomStringData>(&offer, kind)
+                        .await
+                }
+            },
+        }?;
 
-                let _ = state
-                    .room_events
-                    .send(RoomEvent::BroadcastRoomCreated(name3.clone()));
-
-                Ok(RoomCreationReply {
-                    offer: result.offer,
-                    password: room_password2,
-                })
+        let room_map_clone = state.rooms.clone();
+        let remove_room = room_clone.free_room.clone();
+        tokio::spawn(
+            async move {
+                remove_room.cancelled().await;
+                info!("Delete room");
+                room_map_clone.write().await.remove(&name);
             }
-        }
+            .in_current_span(),
+        );
+
+        Ok(RoomCreationReply {
+            offer: response,
+            password: room_password,
+        })
     }
 
     #[instrument(skip(self, ctx, dispatcher), fields(dispatcher_name=dispatcher.name), parent = None, err)]
@@ -222,47 +189,33 @@ impl Mutation {
         ctx: &Context<'a>,
         name: String,
         offer: String,
-        room_type: RoomType,
+        channel_type: ChannelType,
     ) -> anyhow::Result<String> {
         let connection_uuid = Uuid::new_v4();
         tracing::Span::current().record("connection_uuid", connection_uuid.to_string());
-
         let state = ctx.data_unchecked::<Arc<AppState>>();
+        let channel_kind: ChannelKind = channel_type.into();
 
-        match room_type {
-            RoomType::Float => match state.float_rooms.map.read().await.get(&name) {
-                Some(broadcast_room) => Ok(broadcast_room
-                    .read()
-                    .await
-                    .join_room(&offer)
-                    .instrument(Span::current())
-                    .await?),
-                None => Err(anyhow!("No such room {name}")),
+        match state.rooms.read().await.get(&name) {
+            Some(room) => match channel_kind {
+                ChannelKind::AudioChannel => room.join_audio_channel(&offer).await,
+                ChannelKind::DataChannel(kind) => match kind {
+                    DataChannelKind::Float => {
+                        room.join_data_channel::<RoomFloatData>(&offer, kind).await
+                    }
+                    DataChannelKind::String => {
+                        room.join_data_channel::<RoomStringData>(&offer, kind).await
+                    }
+                },
             },
-            RoomType::Chat => match state.chat_rooms.map.read().await.get(&name) {
-                Some(broadcast_room) => Ok(broadcast_room
-                    .read()
-                    .await
-                    .join_room(&offer)
-                    .instrument(Span::current())
-                    .await?),
-                None => Err(anyhow!("No such room {name}")),
-            },
-            RoomType::Audio => match state.audio_rooms.map.read().await.get(&name) {
-                Some(broadcast_room) => Ok(broadcast_room
-                    .read()
-                    .await
-                    .join_room(&offer)
-                    .instrument(Span::current())
-                    .await?),
-                None => Err(anyhow!("No such room {name}")),
-            },
+            None => Err(anyhow::anyhow!("No such room")),
         }
     }
 
     async fn access_dispatcher<'a>(&self, ctx: &Context<'a>, name: String) -> anyhow::Result<Room> {
         let state = ctx.data_unchecked::<Arc<AppState>>();
-
+        todo!()
+        /*
         if let Some(dispatcher) = state.room_dispatchers.read().await.get(&name) {
             match dispatcher.room_type {
                 RoomType::Float => todo!(),
@@ -271,6 +224,26 @@ impl Mutation {
             }
         } else {
             Err(anyhow!("Could not find a dispatcher with the given name"))
+        }
+         */
+    }
+}
+
+// graphql does not allow nested enums, so we have
+// to create a flat one which we then convert to a nested one
+#[derive(Clone, Copy, Debug, Enum, PartialEq, Eq)]
+enum ChannelType {
+    Audio,
+    Float,
+    String,
+}
+
+impl From<ChannelType> for ChannelKind {
+    fn from(value: ChannelType) -> Self {
+        match value {
+            ChannelType::Audio => ChannelKind::AudioChannel,
+            ChannelType::Float => ChannelKind::DataChannel(DataChannelKind::Float),
+            ChannelType::String => ChannelKind::DataChannel(DataChannelKind::String),
         }
     }
 }

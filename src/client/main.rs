@@ -1,12 +1,18 @@
 mod models;
 
+use std::fmt::Display;
+use std::sync::Arc;
 use std::time::Duration;
 
 use clap::{Parser, Subcommand};
 use models::ClientRoomType;
 use shared::api::APIClient;
-use shared::connections::SteckerWebRTCConnection;
-use shared::models::{DataRoomInternalType, SteckerData};
+use shared::connections::{ConnectionEvent, SteckerWebRTCConnection};
+use shared::models::{
+    RoomFloatData, RoomStringData, SteckerChannelType, SteckerData, SteckerDataChanelTrait,
+    SteckerDataChannel,
+};
+use tokio::sync::broadcast;
 
 const LOCAL_HOST: &str = "http://127.0.0.1:8000";
 
@@ -63,22 +69,14 @@ async fn main() {
         }) => {
             let _ = match room_type {
                 ClientRoomType::Float => {
-                    create_room(
-                        name,
-                        password.as_deref(),
-                        host,
-                        room_type.clone(),
-                        SteckerData::F32(42.0),
-                    )
-                    .await
+                    create_room::<RoomFloatData>(name, password.as_deref(), host, 42.0).await
                 }
                 ClientRoomType::Chat => {
-                    create_room(
+                    create_room::<RoomStringData>(
                         name,
                         password.as_deref(),
                         host,
-                        room_type.clone(),
-                        SteckerData::String("Hello?".to_string()),
+                        "Hello?".to_string(),
                     )
                     .await
                 }
@@ -90,47 +88,38 @@ async fn main() {
             host,
         }) => {
             let _ = match room_type {
-                ClientRoomType::Chat => {
-                    let _ = join_room(name, host, room_type).await;
-                }
-                ClientRoomType::Float => {
-                    let _ = join_room(name, host, room_type).await;
-                }
+                ClientRoomType::Float => join_room::<RoomFloatData>(name, host).await,
+                ClientRoomType::Chat => join_room::<RoomStringData>(name, host).await,
             };
         }
         None => {}
     }
 }
 
-async fn create_room(
+async fn create_room<T>(
     name: &str,
     password: Option<&str>,
     host: &str,
-    client_room_type: ClientRoomType,
-    value: SteckerData,
-) -> anyhow::Result<()> {
-    let connection = SteckerWebRTCConnection::build_connection().await?;
+    value: T::Payload,
+) -> anyhow::Result<()>
+where
+    T: SteckerData + SteckerChannelType,
+    T::Payload: Display + Clone,
+    SteckerDataChannel<T>: SteckerDataChanelTrait,
+{
+    let (events, _) = broadcast::channel::<ConnectionEvent>(16);
+    let connection = SteckerWebRTCConnection::build_connection(events).await?;
 
-    let room_type = DataRoomInternalType::from(client_room_type.clone());
-
-    let meta_data_channel = connection
-        .create_data_channel(&DataRoomInternalType::Meta)
-        .await?;
-    let mut meta_msg_receiver = meta_data_channel.inbound.subscribe();
-
-    let data_channel = connection.create_data_channel(&room_type).await?;
+    let data_channel = Arc::new(SteckerDataChannel::<T>::create_channels());
     let data_outbound = data_channel.outbound.clone();
 
-    let api_client = APIClient::new(host.to_string());
+    connection.create_data_channel(data_channel).await?;
 
     let offer = connection.create_offer().await?;
+    let api_client = APIClient::new(host.to_string());
 
-    match api_client
-        .create_room(name, password, &client_room_type.into(), &offer)
-        .await
-    {
+    match api_client.create_room::<T>(name, password, &offer).await {
         Ok(answer) => {
-            // Apply the answer as the remote description
             connection
                 .set_remote_description(answer.session_description)
                 .await?;
@@ -142,17 +131,10 @@ async fn create_room(
                 tokio::pin!(timeout);
 
                 tokio::select! {
-                    _ = timeout.as_mut() =>{
+                    _ = timeout.as_mut() => {
                         println!("Send value: {value}");
                         let _ = data_outbound.send(value.clone());
                     },
-                    raw_meta_msg = meta_msg_receiver.recv() => {
-                        if let Ok(SteckerData::String(msg)) = raw_meta_msg {
-                            println!("META: {msg}");
-                        } else {
-                            println!("Error while receiving meta message");
-                        }
-                    }
                     _ = tokio::signal::ctrl_c() => {
                         println!("Pressed ctrl-c - shutting down");
                         break
@@ -169,60 +151,44 @@ async fn create_room(
     }
 }
 
-async fn join_room(
-    name: &str,
-    host: &str,
-    client_room_type: &ClientRoomType,
-) -> anyhow::Result<()> {
-    let room_type = DataRoomInternalType::from(client_room_type.clone());
+async fn join_room<T>(name: &str, host: &str) -> anyhow::Result<()>
+where
+    T: SteckerData + SteckerChannelType,
+    T::Payload: Display,
+    SteckerDataChannel<T>: SteckerDataChanelTrait,
+{
+    let (events, _) = broadcast::channel::<ConnectionEvent>(16);
+    let connection = SteckerWebRTCConnection::build_connection(events).await?;
 
-    let connection = SteckerWebRTCConnection::build_connection().await?;
+    let data_channel = Arc::new(SteckerDataChannel::<T>::create_channels());
+    let mut inbound = data_channel.inbound.subscribe();
 
-    let stecker_data_channel = connection.create_data_channel(&room_type).await?;
-    let stecker_meta_channel = connection
-        .create_data_channel(&DataRoomInternalType::Meta)
-        .await?;
+    connection.create_data_channel(data_channel).await?;
 
     let offer = connection.create_offer().await?;
-
     let api_client = APIClient::new(host.to_string());
 
-    match api_client
-        .join_room(name, &(client_room_type.clone().into()), &offer)
-        .await
-    {
+    match api_client.join_room::<T>(name, &offer).await {
         Ok(answer) => {
-            // Apply the answer as the remote description
             connection.set_remote_description(answer).await?;
 
             println!("Press ctrl-c to stop");
 
-            let mut receiver = stecker_data_channel.inbound.clone().subscribe();
-            let mut meta_receiver = stecker_meta_channel.inbound.clone().subscribe();
-            let mut close_receiver = stecker_data_channel.close.clone().subscribe();
-
             loop {
                 tokio::select! {
-                    msg = receiver.recv() => {
+                    msg = inbound.recv() => {
                         match msg {
-                            Ok(stecker_data) => {
-                                println!("Received {stecker_data}");
+                            Ok(data) => {
+                                println!("Received {data}");
                             },
                             Err(err) => {
-                                println!("Error while receiving message - stop consuming messages: {err}");
+                                println!("Error while receiving message: {err}");
                                 break
                             },
                         }
                     }
-                    raw_meta_msg = meta_receiver.recv() => {
-                        if let Ok(SteckerData::String(msg)) = raw_meta_msg {
-                            println!("META: {msg}");
-                        } else {
-                            println!("Error while receiving meta message");
-                        }
-                    },
-                    _ = close_receiver.recv() => {
-                        println!("received close signal!");
+                    _ = connection.wait_for_disconnect() => {
+                        println!("Server closed connection");
                         break
                     }
                     _ = tokio::signal::ctrl_c() => {

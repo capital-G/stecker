@@ -5,38 +5,32 @@
 #include "rust/cxx.h"
 #include <memory>
 
-namespace SuperStecker {
 
-class SuperStecker : public SCUnit {
-// needs to be public so it can be accessed by subclasses
+class DataSteckerReceiver : public SCUnit {
 public:
-    rust::Str extractString(int lenIndex, int startIndex);
-    rust::Str extractStringAr(int lenIndex, int startIndex);
+
+    DataSteckerReceiver();
+    ~DataSteckerReceiver() {
+        close_data_receiver_room(mDataRoom);
+    }
+    void next_k(int);
+
+    DataRoomReceiver *mDataRoom;
 };
 
-class DataStecker : public SuperStecker {
+class DataSteckerSender : public SCUnit {
 public:
-    std::unique_ptr<rust::Box<DataRoom>> m_data_room;
-    ~DataStecker();
-};
-
-class DataSteckerIn : public DataStecker {
-public:
-    DataSteckerIn();
+    DataSteckerSender();
+    ~DataSteckerSender() {
+        close_data_sender_room(mDataRoom);
+    };
 
 private:
     void next_k(int nSamples);
+    DataRoomSender *mDataRoom;
 };
 
-class DataSteckerOut : public DataStecker {
-public:
-    DataSteckerOut();
-
-private:
-    void next_k(int nSamples);
-};
-
-class SteckerOut : public SuperStecker {
+class SteckerOut : public SCUnit {
 public:
     std::unique_ptr<rust::Box<AudioRoomSender>> m_audio_room;
     SteckerOut();
@@ -45,7 +39,7 @@ private:
     void next(int nSamples);
 };
 
-class SteckerIn : public SuperStecker {
+class SteckerIn : public SCUnit {
 public:
     std::unique_ptr<rust::Box<AudioRoomReceiver>> m_audio_room;
     SteckerIn();
@@ -53,5 +47,3 @@ public:
 private:
     void next(int nSamples);
 };
-
-} // namespace SuperStecker

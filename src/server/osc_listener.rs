@@ -14,7 +14,8 @@ use tokio_util::codec::{Decoder, Encoder, FramedRead, FramedWrite};
 use tower::Service;
 use tracing::{debug, error, instrument, trace, Instrument};
 
-use crate::models::{DispatcherType, RoomDispatcherInput, RoomType};
+use crate::models::dispatcher::{DispatcherType, RoomDispatcherInput};
+use crate::models::room::RoomType;
 use crate::state::AppState;
 
 impl TryFrom<OscMessage> for RoomDispatcherInput {
