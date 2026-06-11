@@ -71,7 +71,7 @@ pub struct BroadcastRoom {
     // all metadata for a room is stored in a dedicated such that it can be cloned for schema access
     meta: BroadcastRoomMeta,
 
-    pub free_room: broadcast::Sender<()>,
+    pub free_room: CancellationToken,
     active_channels: Arc<Mutex<u32>>,
     current_deletion_token: Arc<Mutex<CancellationToken>>,
     timeout: Duration,
@@ -81,7 +81,6 @@ type ResponseOffer = String;
 
 impl BroadcastRoom {
     pub fn new(name: String, password: String, uuid: Uuid, description: String) -> Self {
-        let (free_room, _) = broadcast::channel::<()>(1);
         let (audio_sequence_offset, _) = watch::channel(0);
         Self {
             audio_channel: RwLock::new(None),
@@ -89,7 +88,7 @@ impl BroadcastRoom {
             chat_channel: RwLock::new(None),
             meta: BroadcastRoomMeta::new(name.clone(), uuid, password.clone(), description),
             current_deletion_token: Arc::new(Mutex::new(CancellationToken::new())),
-            free_room,
+            free_room: CancellationToken::new(),
             active_channels: Arc::new(Mutex::new(0)),
             timeout: Duration::from_secs(30),
             audio_sequence_offset,
@@ -243,7 +242,7 @@ impl BroadcastRoom {
         active_channels: Arc<Mutex<u32>>,
         room_deletion_token: Arc<Mutex<CancellationToken>>,
         room_timeout: Duration,
-        trigger_free_room: Sender<()>,
+        trigger_free_room: CancellationToken,
     ) {
         *active_channels.lock().await -= 1;
 
@@ -269,7 +268,7 @@ impl BroadcastRoom {
             }
             _ = sleep(room_timeout) => {
                 trace!("Room can be freed");
-                let _ = trigger_free_room.send(());
+                let _ = trigger_free_room.cancel();
             }
         }
     }

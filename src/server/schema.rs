@@ -156,13 +156,12 @@ impl Mutation {
         }?;
 
         let room_map_clone = state.rooms.clone();
-        let mut remove_room = room_clone.free_room.clone().subscribe();
+        let remove_room = room_clone.free_room.clone();
         tokio::spawn(
             async move {
-                if let Ok(()) = remove_room.recv().await {
-                    info!("Delete room");
-                    room_map_clone.write().await.remove(&name);
-                }
+                remove_room.cancelled().await;
+                info!("Delete room");
+                room_map_clone.write().await.remove(&name);
             }
             .in_current_span(),
         );
