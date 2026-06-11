@@ -187,8 +187,6 @@ pub struct SteckerAudioChannel {
     pub audio_channel_rx: tokio::sync::watch::Receiver<Option<Arc<TrackLocalStaticRTP>>>,
     // channel which we use to push an audio channel to our consumers
     pub audio_channel_tx: tokio::sync::watch::Sender<Option<Arc<TrackLocalStaticRTP>>>,
-    // sends a signal if the connection was closed by our peer
-    pub close: Sender<()>,
     // drops the current source WebRTC connection so it can be replaced by a new one
     pub reset_sender: Arc<Notify>,
     // if we want to replace a running sender, we also need to continue the sequence_number
@@ -198,14 +196,12 @@ pub struct SteckerAudioChannel {
 
 impl SteckerAudioChannel {
     pub fn create_channels() -> Self {
-        let (close, _) = broadcast::channel::<()>(1);
         let (audio_channel_tx, audio_channel_rx) = tokio::sync::watch::channel(None);
         let reset_sender = Arc::new(Notify::new());
         let (sequence_number, _) = watch::channel::<u16>(0);
         SteckerAudioChannel {
             audio_channel_tx,
             audio_channel_rx,
-            close,
             reset_sender,
             sequence_number,
         }
