@@ -1,4 +1,4 @@
-use crate::models::{SteckerData, SteckerDataChanelTrait, SteckerDataChannel};
+use crate::models::{SteckerChannelType, SteckerData, SteckerDataChanelTrait, SteckerDataChannel};
 use crate::utils::{decode_b64, encode_offer};
 
 use anyhow::anyhow;
@@ -244,13 +244,13 @@ impl SteckerWebRTCConnection {
     #[instrument(skip_all)]
     pub async fn wait_for_data_channel<T>(&self) -> Arc<RTCDataChannel>
     where
-        T: SteckerData,
+        T: SteckerData + SteckerChannelType,
         SteckerDataChannel<T>: SteckerDataChanelTrait,
     {
         let mut events = self.connection_events.subscribe();
         loop {
             if let Ok(ConnectionEvent::NewDataChannel(data_channel)) = events.recv().await {
-                if T::matches_data_channel(&data_channel) {
+                if T::label() == data_channel.label() {
                     trace!("Matched data channel");
                     return data_channel;
                 }
@@ -293,7 +293,7 @@ impl SteckerWebRTCConnection {
         stecker_channel: Arc<SteckerDataChannel<T>>,
     ) -> anyhow::Result<()>
     where
-        T: SteckerData,
+        T: SteckerData + SteckerChannelType,
         SteckerDataChannel<T>: SteckerDataChanelTrait,
     {
         match self

@@ -9,7 +9,8 @@ use models::ClientRoomType;
 use shared::api::APIClient;
 use shared::connections::{ConnectionEvent, SteckerWebRTCConnection};
 use shared::models::{
-    RoomFloatData, RoomStringData, SteckerData, SteckerDataChanelTrait, SteckerDataChannel,
+    RoomFloatData, RoomStringData, SteckerChannelType, SteckerData, SteckerDataChanelTrait,
+    SteckerDataChannel,
 };
 use tokio::sync::broadcast;
 
@@ -102,7 +103,7 @@ async fn create_room<T>(
     value: T::Payload,
 ) -> anyhow::Result<()>
 where
-    T: SteckerData,
+    T: SteckerData + SteckerChannelType,
     T::Payload: Display + Clone,
     SteckerDataChannel<T>: SteckerDataChanelTrait,
 {
@@ -152,7 +153,7 @@ where
 
 async fn join_room<T>(name: &str, host: &str) -> anyhow::Result<()>
 where
-    T: SteckerData,
+    T: SteckerData + SteckerChannelType,
     T::Payload: Display,
     SteckerDataChannel<T>: SteckerDataChanelTrait,
 {

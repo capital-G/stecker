@@ -6,7 +6,9 @@ use opus::{Channels as OpusChannels, Decoder as OpusDecoder, Encoder as OpusEnco
 use ringbuf::traits::{Consumer, Observer, Producer, Split};
 use ringbuf::{HeapCons, HeapProd, HeapRb};
 use shared::connections::ConnectionEvent;
-use shared::models::{RoomAudioData, RoomFloatData, SteckerDataChanelTrait, SteckerDataChannel};
+use shared::models::{
+    RoomFloatData, SteckerAudioChannel, SteckerDataChanelTrait, SteckerDataChannel,
+};
 use tokio::runtime::Runtime;
 use tokio::sync::broadcast::{self, Sender};
 
@@ -279,7 +281,7 @@ impl AudioRoomSender {
                 });
 
                 let api_client = APIClient::new(host2.to_string());
-                let answer = api_client.create_room::<RoomAudioData>(&name2, Some(&password2), &offer).await?;
+                let answer = api_client.create_room::<SteckerAudioChannel>(&name2, Some(&password2), &offer).await?;
                 connection.set_remote_description(answer.session_description).await?;
                 let _ = sc_close_receiver.recv().await;
                 anyhow::Ok(())
@@ -338,7 +340,7 @@ impl AudioRoomReceiver {
 
                 let api_client = APIClient::new(host2);
                 let answer = api_client
-                    .join_room::<RoomAudioData>(&name2, &offer)
+                    .join_room::<SteckerAudioChannel>(&name2, &offer)
                     .await?;
                 connection.set_remote_description(answer).await?;
 

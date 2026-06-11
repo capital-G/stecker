@@ -3,8 +3,8 @@ use anyhow::anyhow;
 use async_graphql::{Enum, SimpleObject};
 use shared::connections::SteckerWebRTCConnection;
 use shared::models::{
-    DataChannelEvent, RoomFloatData, RoomStringData, SteckerAudioChannel, SteckerData,
-    SteckerDataChanelTrait, SteckerDataChannel,
+    DataChannelEvent, RoomFloatData, RoomStringData, SteckerAudioChannel, SteckerChannelType,
+    SteckerData, SteckerDataChanelTrait, SteckerDataChannel,
 };
 use std::fmt::Display;
 use std::sync::Arc;
@@ -280,7 +280,7 @@ impl BroadcastRoom {
         kind: DataChannelKind,
     ) -> anyhow::Result<ResponseOffer>
     where
-        T: SteckerData + 'static + Clone,
+        T: SteckerData + SteckerChannelType + 'static + Clone,
         DataChannelKind: ChannelAccess<T>,
     {
         info!(?kind, "Creating data channel");
@@ -340,7 +340,7 @@ impl BroadcastRoom {
         kind: DataChannelKind,
     ) -> anyhow::Result<ResponseOffer>
     where
-        T: SteckerData + 'static + Clone,
+        T: SteckerData + SteckerChannelType + 'static + Clone,
         DataChannelKind: ChannelAccess<T>,
     {
         info!("Joining data channel");

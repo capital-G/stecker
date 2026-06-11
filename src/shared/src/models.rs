@@ -32,18 +32,33 @@ pub struct RoomFloatData;
 #[derive(Debug, Clone, Copy)]
 pub struct RoomStringData;
 
+pub trait SteckerChannelType {
+    fn label() -> String;
+}
+
+impl SteckerChannelType for RoomFloatData {
+    fn label() -> String {
+        "FLOAT".to_string()
+    }
+}
+
+impl SteckerChannelType for RoomStringData {
+    fn label() -> String {
+        "STRING".to_string()
+    }
+}
+
+impl SteckerChannelType for SteckerAudioChannel {
+    fn label() -> String {
+        "AUDIO".to_string()
+    }
+}
+
 pub trait SteckerData {
     type Payload: Clone + Send + 'static;
 
-    /// each data channel has a label - this is used to identify
-    /// what kind of channel we are publishing or receiving.
-    fn label() -> String;
-
     fn encode(value: Self::Payload) -> anyhow::Result<Bytes>;
     fn decode(message: DataChannelMessage) -> anyhow::Result<Self::Payload>;
-    fn matches_data_channel(data_channel: &Arc<RTCDataChannel>) -> bool {
-        data_channel.label() == Self::label()
-    }
 }
 
 impl SteckerData for RoomFloatData {
@@ -59,10 +74,6 @@ impl SteckerData for RoomFloatData {
         let mut b = message.data.clone();
         Ok(Bytes::get_f32(&mut b))
     }
-
-    fn label() -> String {
-        "FLOAT".to_string()
-    }
 }
 impl SteckerData for RoomStringData {
     type Payload = String;
@@ -74,30 +85,10 @@ impl SteckerData for RoomStringData {
     fn decode(message: DataChannelMessage) -> anyhow::Result<Self::Payload> {
         Ok(String::from_utf8(message.data.to_vec())?)
     }
-
-    fn label() -> String {
-        "STRING".to_string()
-    }
 }
 
-#[derive(Debug, Clone, Copy)]
-pub struct RoomAudioData;
-
-impl SteckerData for RoomAudioData {
-    type Payload = ();
-
-    fn label() -> String {
-        "AUDIO".to_string()
-    }
-
-    fn encode(_value: Self::Payload) -> anyhow::Result<Bytes> {
-        anyhow::bail!("Audio rooms do not use data channel encoding")
-    }
-
-    fn decode(_message: DataChannelMessage) -> anyhow::Result<Self::Payload> {
-        anyhow::bail!("Audio rooms do not use data channel decoding")
-    }
-}
+// #[derive(Debug, Clone, Copy)]
+// pub struct RoomAudioData;
 
 #[derive(Clone)]
 pub enum DataChannelEvent {

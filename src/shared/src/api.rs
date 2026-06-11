@@ -1,3 +1,4 @@
+use crate::models::SteckerChannelType;
 use crate::{models::SteckerData, utils::decode_b64};
 use anyhow::bail;
 use reqwest::StatusCode;
@@ -50,7 +51,7 @@ impl APIClient {
 
 impl APIClient {
     #[instrument(skip_all, err)]
-    pub async fn create_room<T: SteckerData>(
+    pub async fn create_room<T: SteckerChannelType>(
         &self,
         name: &str,
         password: Option<&str>,
@@ -118,7 +119,7 @@ impl APIClient {
     }
 
     #[instrument(skip_all, err)]
-    pub async fn join_room<T: SteckerData>(
+    pub async fn join_room<T: SteckerChannelType>(
         &self,
         name: &str,
         local_session_description: &str,
